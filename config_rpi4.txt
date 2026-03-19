@@ -1,0 +1,23 @@
+[pi4]
+# --- BOOTLOADER NIXOS (CRITIQUE) ---
+kernel=u-boot-rpi4.bin
+enable_gic=1
+armstub=armstub8-gic.bin
+
+[all]
+# --- CONFIGURATION GLOBALE ---
+arm_64bit=1
+enable_uart=1
+avoid_warnings=1
+disable_overscan=1
+
+# --- REGLAGES OVERCLOCKING (2.1 GHz) ---
+over_voltage=6
+arm_freq=2100
+gpu_freq=750
+force_turbo=0
+
+# --- CONFIGURATION ECRAN ---
+# On remet le pilote de secours pour garantir le boot
+dtoverlay=vc4-fkms-v3d
+dtoverlay=gpio-fan,gpiopin=14,temp=60000
