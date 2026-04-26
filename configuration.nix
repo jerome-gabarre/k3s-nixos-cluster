@@ -138,8 +138,8 @@ in
       # Empêche la planification des pods normaux sur ce noeud
       "--node-taint node-role.kubernetes.io/control-plane=true:NoSchedule"
       # On force l'IP filaire pour toutes les communications du cluster
-      "--node-ip=192.168.10.102"
-      "--advertise-address=192.168.10.102"
+      "--node-ip=192.168.10.103"
+      "--advertise-address=192.168.10.103"
       # Optionnel mais recommandé : Désactive Traefik et Servicelb
       "--disable traefik"
       "--disable servicelb"
