@@ -187,14 +187,14 @@ in
       echo "Sauvegarde de la configuration NixOS..."
       cp /etc/nixos/*.nix $BACKUP_DIR/
       
+      # Sauvegarde du coffre-fort SOPS (remplace la sauvegarde du token en clair)
+      echo "Sauvegarde des secrets chiffrés..."
+      cp /etc/nixos/secrets.yaml $BACKUP_DIR/
+      cp /etc/nixos/.sops.yaml $BACKUP_DIR/
+
       if [ -f /boot/firmware/config.txt ]; then
         echo "Sauvegarde du config.txt..."
         cp /boot/firmware/config.txt $BACKUP_DIR/
-      fi
-
-      if [ -f /var/lib/rancher/k3s/server/node-token ]; then
-        echo "Sauvegarde du Token K3s..."
-        cp /var/lib/rancher/k3s/server/node-token $BACKUP_DIR/k3s-node-token.txt
       fi
 
       # 4. Envoi Cloud

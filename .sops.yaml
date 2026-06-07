@@ -1,0 +1,10 @@
+keys:
+  - &master_key age1qmlxfhscaexxqeaw59aqc66r2qce2suxge537pm7rtc8w7glp98s9xgny7
+  - &worker_key age1exuvqadwpmj5tfxczj429r30k96waapzps9pwtsx6dk9msqysanqma64dw
+
+creation_rules:
+  - path_regex: secrets.yaml$
+    key_groups:
+      - age:
+          - *master_key
+          - *worker_key
