@@ -23,6 +23,11 @@
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
 
+  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
+  services.openiscsi.enable = true;
+  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
+  environment.systemPackages = with pkgs; [ util-linux nfs-utils openiscsi ];
+
   # --- ACTIVATION SSH AVEC IDENTITÉ PERSISTANTE ---
   services.openssh = {
     enable = true;

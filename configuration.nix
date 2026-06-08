@@ -17,6 +17,9 @@ in
       "${nixos-hardware}/raspberry-pi/4"
     ];
 
+  # --- ARCHITECTURE CIBLE DU MASTER ---
+  nixpkgs.hostPlatform = "aarch64-linux";
+
   # --- ACTIVATION DE L'ÉMULATION X86_64 (CRITIQUE) ---
   # Permet au Raspberry Pi (ARM) d'assembler l'image pour le PC (Intel/AMD)
   boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
