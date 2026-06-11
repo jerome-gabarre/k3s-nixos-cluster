@@ -31,6 +31,13 @@ in
   # NOYAU RPI4 (Le seul qui comprend le DSI correctement)
   boot.kernelPackages = pkgs.linuxPackages_rpi4;
 
+  # Activation des cgroups mémoire
+  boot.kernelParams = [
+    "cgroup_enable=cpuset"
+    "cgroup_memory=1"
+    "cgroup_enable=memory"
+  ];
+
   # --- CONFIGURATIONS MATÉRIELLES SUPPLÉMENTAIRES ---
   hardware.deviceTree.enable = false;
   hardware.i2c.enable = true;
@@ -136,6 +143,7 @@ in
 
   services.k3s = {
     enable = true;
+    package = pkgs.k3s_1_31;
     role = "server"; # Rôle master
     
     # Déclaration explicite du Taint et autres arguments de démarrage

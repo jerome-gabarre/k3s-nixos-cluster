@@ -61,6 +61,7 @@
   # --- 1. CONFIGURATION DE L'AGENT K3S ---
    services.k3s = {
     enable = true;
+    package = pkgs.k3s_1_31;
     role = "agent";
     serverAddr = "https://192.168.10.103:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
