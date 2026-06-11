@@ -17,11 +17,21 @@
 
   # --- CRITIQUE POUR LE MATÉRIEL DE RÉCUPÉRATION ---
   # Charge tous les pilotes propriétaires (Realtek, Intel, Broadcom...)
-  hardware.enableRedistributableFirmware = true;
+  hardware.enableRedistributableFirmware = false;
 
   # --- PARAMÈTRE SYSTÈME OBLIGATOIRE ---
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
+
+  # --- CONTOURNEMENT POUR LONGHORN SUR NIXOS ---
+  system.activationScripts.longhorn-iscsi = ''
+    mkdir -p /usr/bin /usr/local/bin
+    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/bin/iscsiadm
+    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/local/bin/iscsiadm
+  '';
+
+  # --- AUTORISER LE RÉSEAU INTERNE KUBERNETES ---
+  networking.firewall.enable = false;
 
   # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
   services.openiscsi.enable = true;
@@ -104,6 +114,13 @@
         mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node
       fi
 
+      echo "Persistance du dossier Longhorn sur le disque physique..."
+      mkdir -p $MOUNT_POINT/longhorn_data
+      mkdir -p /var/lib/longhorn
+      if ! mountpoint -q /var/lib/longhorn; then
+        mount --bind $MOUNT_POINT/longhorn_data /var/lib/longhorn
+      fi
+
       # --- NOUVEAU : DÉCHIFFREMENT SOPS À LA VOLÉE ---
       echo "Déchiffrement du token K3s avec la clé SSH locale..."
 
@@ -124,4 +141,19 @@
       echo "🚀 Stockage local et secrets prêts ! K3s va pouvoir démarrer."
     '';
   };
+
+  # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
+  nix = {
+    gc = {
+      automatic = true;
+      dates = "daily"; # Se lance tous les jours
+      options = "--delete-older-than 3d"; # SUPPRIME les versions de plus de 3 jours
+    };
+    optimise = {
+      automatic = true;
+      dates = [ "daily" ]; # DÉDOUBLONNE le store tous les jours en arrière-plan
+    };
+    settings.auto-optimise-store = true; # Dédoublonne aussi à la volée pendant la compilation
+  };
+
  }
