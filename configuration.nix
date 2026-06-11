@@ -35,6 +35,13 @@ in
   hardware.deviceTree.enable = false;
   hardware.i2c.enable = true;
 
+  # --- CONTOURNEMENT POUR LONGHORN SUR NIXOS ---
+  system.activationScripts.longhorn-iscsi = ''
+    mkdir -p /usr/bin /usr/local/bin
+    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/bin/iscsiadm
+    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/local/bin/iscsiadm
+  '';
+
   # --- ALLOCATION RAM VIDEO ET MODULES ---
   boot.kernelModules = [ 
     "i2c-dev" 
@@ -104,14 +111,17 @@ in
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
 
-  # --- 1. CONFIGURATION RÉSEAU ET WI-FI ---
+  # --- AUTORISER LE RÉSEAU INTERNE KUBERNETES ---
+  networking.firewall.enable = false;
+
+  # --- CONFIGURATION RÉSEAU ET WI-FI ---
   # NetworkManager est le standard industriel pour gérer le Wi-Fi facilement
   networking.networkmanager.enable = true;
   boot.blacklistedKernelModules = [ "brcmfmac" "brcmutil" ];
   # Optionnel : définir le nom de la machine sur le réseau
   networking.hostName = "k3s-master";
 
-  # --- 2. OPTIMISATIONS DES PERFORMANCES (NIXOS) ---
+  # --- OPTIMISATIONS DES PERFORMANCES (NIXOS) ---
   
   # Forcer le processeur en mode performance (utile pour l'overclocking)
   powerManagement.cpuFreqGovernor = "schedutil";
@@ -119,18 +129,10 @@ in
   # Activation du ZRAM (Ultra Critique)
   zramSwap.enable = true;
 
-  # --- 3. OPTIMISATION DU STOCKAGE NIX ---
-  nix.settings.auto-optimise-store = true;
-  nix.gc = {
-    automatic = true;
-    dates = "weekly";
-    options = "--delete-older-than 15d";
-  };
-
-  # --- 4. ORCHESTRATION K3S (NŒUD MAÎTRE) ---
+  # --- ORCHESTRATION K3S (NŒUD MAÎTRE) ---
   
   # Ouverture du port vital pour que les "Workers" (votre PC) puissent communiquer avec le Master
-  networking.firewall.allowedTCPPorts = [ 6443 ];
+  networking.firewall.allowedTCPPorts = [ 6443 80 8088 ];
 
   services.k3s = {
     enable = true;
@@ -143,13 +145,12 @@ in
       # On force l'IP filaire pour toutes les communications du cluster
       "--node-ip=192.168.10.103"
       "--advertise-address=192.168.10.103"
-      # Optionnel mais recommandé : Désactive Traefik et Servicelb
-      "--disable traefik"
-      "--disable servicelb"
+      "--node-label svccontroller.k3s.cattle.io/enable=false"
+
     ];
   };
 
-  # --- 5. PAQUETS SYSTÈME ---
+  # --- PAQUETS SYSTÈME ---
   environment.systemPackages = with pkgs; [
     vim
     wget
@@ -164,10 +165,13 @@ in
     hwinfo
     btop
     onboard
+    util-linux
+    nfs-utils
+    openiscsi
 
   ];
 
-  # --- 6. SAUVEGARDE AUTOMATIQUE VERS GOOGLE DRIVE ---
+  # --- SAUVEGARDE AUTOMATIQUE VERS GOOGLE DRIVE ---
   systemd.services.backup-config-gdrive = {
     description = "Backup NixOS config and K3s token to Google Drive";
     path = [ pkgs.coreutils pkgs.inetutils ];
@@ -225,16 +229,37 @@ in
     };
   };
 
-  # --- 7. CONFIGURATION DU SERVEUR PXE (PIXIECORE) ---
+  # --- CONFIGURATION DU SERVEUR PXE (PIXIECORE) ---
   services.pixiecore = {
     enable = true;
     openFirewall = true;
     dhcpNoBind = true;
     mode = "boot";
+    port = 8088;         # On libère le port 80 pour K3s
+    statusPort = 8088;
     # On pointe vers les fichiers générés par l'évaluation du workerImage
     kernel = "${workerImage.config.system.build.kernel}/bzImage";
     initrd = "${workerImage.config.system.build.netbootRamdisk}/initrd";
     # Les paramètres passés au noyau du worker au démarrage
     cmdLine = "init=${workerImage.config.system.build.toplevel}/init loglevel=4";
   };
+
+  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
+  services.openiscsi.enable = true;
+  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
+
+  # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
+  nix = {
+    gc = {
+      automatic = true;
+      dates = "daily"; # Se lance tous les jours
+      options = "--delete-older-than 3d"; # SUPPRIME les versions de plus de 3 jours
+    };
+    optimise = {
+      automatic = true;
+      dates = [ "daily" ]; # DÉDOUBLONNE le store tous les jours en arrière-plan
+    };
+    settings.auto-optimise-store = true; # Dédoublonne aussi à la volée pendant la compilation
+  };
+
 }
