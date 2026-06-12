@@ -181,7 +181,7 @@ in
 
   # --- SAUVEGARDE AUTOMATIQUE VERS GOOGLE DRIVE ---
   systemd.services.backup-config-gdrive = {
-    description = "Backup NixOS config and K3s token to Google Drive";
+    description = "Backup NixOS config and secrets to Google Drive";
     path = [ pkgs.coreutils pkgs.inetutils ];
     serviceConfig = {
       Type = "oneshot";
@@ -196,30 +196,30 @@ in
 
       # 2. Préparation
       rm -rf $BACKUP_DIR
-      mkdir -p $BACKUP_DIR
+      mkdir -p $BACKUP_DIR/nixos
 
-      # 3. Copie des fichiers vitaux
-      echo "Sauvegarde de la configuration NixOS..."
-      cp /etc/nixos/*.nix $BACKUP_DIR/
-      
-      # Sauvegarde du coffre-fort SOPS (remplace la sauvegarde du token en clair)
-      echo "Sauvegarde des secrets chiffrés..."
-      cp /etc/nixos/secrets.yaml $BACKUP_DIR/
-      cp /etc/nixos/.sops.yaml $BACKUP_DIR/
+      # 3. Copie des fichiers vitaux (Architecture exacte)
+      echo "Sauvegarde de l'environnement NixOS local..."
+      # cp -a force une copie absolue (permissions + fichiers cachés) du dossier
+      cp -a /etc/nixos/. $BACKUP_DIR/nixos/
 
       if [ -f /boot/firmware/config.txt ]; then
         echo "Sauvegarde du config.txt..."
         cp /boot/firmware/config.txt $BACKUP_DIR/
       fi
 
-      # 4. Envoi Cloud
+      # 4. Envoi Cloud : Sync pour Latest, Copy pour History
       echo "Upload vers Google Drive..."
-      ${pkgs.rclone}/bin/rclone copy $BACKUP_DIR "$REMOTE/latest"
+      ${pkgs.rclone}/bin/rclone sync $BACKUP_DIR "$REMOTE/latest"
       ${pkgs.rclone}/bin/rclone copy $BACKUP_DIR "$REMOTE/history/$DATE"
       
       # --- PURGE DES VIEUX FICHIERS (> 30 Jours) ---
       echo "Nettoyage des archives de plus de 30 jours..."
-      ${pkgs.rclone}/bin/rclone delete "$REMOTE/history" --min-age 30d --rmdirs
+      # On supprime les vieux fichiers sans bloquer si rclone renvoie un avertissement
+      ${pkgs.rclone}/bin/rclone delete "$REMOTE/history" --min-age 30d || true
+      
+      # On supprime uniquement les dossiers devenus vides (--leave-root pour ne pas effacer /history/)
+      ${pkgs.rclone}/bin/rclone rmdirs "$REMOTE/history" --leave-root || true
       
       # 5. Nettoyage local
       rm -rf $BACKUP_DIR
