@@ -70,6 +70,34 @@ in
 	};
   };
 
+  # --- MAINTENANCE K3S : OPTIMISATION DE LA BASE SQLITE ---
+  systemd.services.k3s-sqlite-vacuum = {
+    description = "Defragmentation et nettoyage de la base K3s (SQLite)";
+    path = [ pkgs.sqlite ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = "root";
+    };
+    script = ''
+      echo "Démarrage de l'optimisation de la base K3s..."
+      # busy_timeout: attend jusqu'à 5s si k3s verrouille la base
+      # wal_checkpoint(TRUNCATE): force l'écriture du journal WAL dans la base principale
+      # VACUUM: reconstruit le fichier pour libérer l'espace disque physique
+      sqlite3 /var/lib/rancher/k3s/server/db/state.db 'PRAGMA busy_timeout=5000; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;'
+      echo "Optimisation terminée."
+    '';
+  };
+
+  systemd.timers.k3s-sqlite-vacuum = {
+    wantedBy = [ "timers.target" ];
+    partOf = [ "k3s-sqlite-vacuum.service" ];
+    timerConfig = {
+      OnCalendar = "*-*-* 03:00:00"; # Tous les jours à 3h00 du matin
+      Persistent = true;                 # Rattrape l'exécution si le Pi était éteint
+      RandomizedDelaySec = "10m";        # Évite les pics de charge à la seconde pile
+    };
+  };
+
   # Définition déclarative de l'utilisateur
   users.users.nixos = {
     isNormalUser = true;
