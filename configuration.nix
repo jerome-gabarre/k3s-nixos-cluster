@@ -181,8 +181,8 @@ in
 
   # --- SAUVEGARDE AUTOMATIQUE VERS GOOGLE DRIVE ---
   systemd.services.backup-config-gdrive = {
-    description = "Backup NixOS config and secrets to Google Drive";
-    path = [ pkgs.coreutils pkgs.inetutils ];
+    description = "Backup NixOS config, K3s state and secrets to Google Drive";
+    path = [ pkgs.coreutils pkgs.inetutils pkgs.sqlite pkgs.rclone ];
     serviceConfig = {
       Type = "oneshot";
       User = "root";
@@ -197,10 +197,10 @@ in
       # 2. Préparation
       rm -rf $BACKUP_DIR
       mkdir -p $BACKUP_DIR/nixos
+      mkdir -p $BACKUP_DIR/k3s-state
 
-      # 3. Copie des fichiers vitaux (Architecture exacte)
+      # 3. Copie des fichiers vitaux (Architecture NixOS)
       echo "Sauvegarde de l'environnement NixOS local..."
-      # cp -a force une copie absolue (permissions + fichiers cachés) du dossier
       cp -a /etc/nixos/. $BACKUP_DIR/nixos/
 
       if [ -f /boot/firmware/config.txt ]; then
@@ -208,20 +208,25 @@ in
         cp /boot/firmware/config.txt $BACKUP_DIR/
       fi
 
-      # 4. Envoi Cloud : Sync pour Latest, Copy pour History
+      # 4. Sauvegarde de l'état K3s (Cerveau du Cluster)
+      echo "Sauvegarde de la base de données K3s et des certificats TLS..."
+      # Dump à chaud de la base SQLite (Garantit l'intégrité de l'archive)
+      sqlite3 /var/lib/rancher/k3s/server/db/state.db ".backup '$BACKUP_DIR/k3s-state/state.db'"
+      
+      # Copie des certificats d'autorité (Évite de devoir recréer les workers en cas de crash)
+      cp -a /var/lib/rancher/k3s/server/tls $BACKUP_DIR/k3s-state/
+
+      # 5. Envoi Cloud : Sync pour Latest, Copy pour History
       echo "Upload vers Google Drive..."
-      ${pkgs.rclone}/bin/rclone sync $BACKUP_DIR "$REMOTE/latest"
-      ${pkgs.rclone}/bin/rclone copy $BACKUP_DIR "$REMOTE/history/$DATE"
+      rclone sync $BACKUP_DIR "$REMOTE/latest"
+      rclone copy $BACKUP_DIR "$REMOTE/history/$DATE"
       
       # --- PURGE DES VIEUX FICHIERS (> 30 Jours) ---
       echo "Nettoyage des archives de plus de 30 jours..."
-      # On supprime les vieux fichiers sans bloquer si rclone renvoie un avertissement
-      ${pkgs.rclone}/bin/rclone delete "$REMOTE/history" --min-age 30d || true
+      rclone delete "$REMOTE/history" --min-age 30d || true
+      rclone rmdirs "$REMOTE/history" --leave-root || true
       
-      # On supprime uniquement les dossiers devenus vides (--leave-root pour ne pas effacer /history/)
-      ${pkgs.rclone}/bin/rclone rmdirs "$REMOTE/history" --leave-root || true
-      
-      # 5. Nettoyage local
+      # 6. Nettoyage local
       rm -rf $BACKUP_DIR
       echo "Sauvegarde terminée avec succès."
     '';
