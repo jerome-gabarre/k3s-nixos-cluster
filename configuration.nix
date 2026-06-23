@@ -1,3 +1,18 @@
+# =====================================================================
+# ⚠️ ARCHITECTURE MASTER (RASPBERRY PI 4 - ARM64 / 8GB RAM)
+# =====================================================================
+# RÈGLES DE DÉPLOIEMENT HYBRIDE (NE PAS MODIFIER SUR LE SERVEUR) :
+#
+# 1. DÉPLOIEMENT OS (NixOS) : Mode "Push" depuis WSL.
+#    -> Ne JAMAIS lancer `nixos-rebuild switch` directement ici (Risque OOM).
+#    -> Le build est déporté : utiliser la commande `deploy-os` depuis le shell.
+#
+# 2. DÉPLOIEMENT APPLICATIF (k3s) : Mode "Pull" (GitOps via FluxCD).
+#    -> L'état du cluster applicatif est géré de manière autonome.
+#    -> Toute modification manuelle des pods via SSH/kubectl sera écrasée.
+#    -> Modifier les manifestes locaux et pousser via la commande `git-sync`.
+# =====================================================================
+
 { config, pkgs, ... }:
 
 let
