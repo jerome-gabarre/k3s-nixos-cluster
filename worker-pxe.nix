@@ -67,20 +67,26 @@
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
   };
 
-  # --- SCRIPT DE PROVISIONNEMENT AUTOMATIQUE DU DISQUE ---
-    systemd.services.prepare-k3s-disk = {
+  # =====================================================================
+  # ⚠️ ORCHESTRATION DU STOCKAGE HYBRIDE (STATELESS OS -> STATEFUL DATA)
+  # =====================================================================
+  # Ce Worker bootant en réseau (PXE), sa RAM et son OS sont réinitialisés à chaque démarrage.
+  # Ce script garantit la survie des bases de données (K3s/Longhorn) et des secrets (SOPS)
+  # en forçant l'écriture sur le disque dur physique de la machine.
+  # =====================================================================
+  systemd.services.prepare-k3s-disk = {
     description = "Initialisation, montage du disque et déchiffrement SOPS";
     before = [ "k3s.service" "sshd.service" ];
     requiredBy = [ "k3s.service" "sshd.service" ];
     
-    # Ajout de SOPS et SSH-TO-AGE dans les paquets disponibles
-    path = with pkgs; [ util-linux parted e2fsprogs systemd gawk sops ssh-to-age openssh ];
+    path = with pkgs;
+    [ util-linux parted e2fsprogs systemd gawk sops ssh-to-age openssh ];
     
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
     };
-
+    
     script = ''
       set -e
       LABEL="K3S_DATA"
@@ -88,26 +94,41 @@
       
       echo "Vérification de la présence d'une partition locale '$LABEL'..."
 
+      # -----------------------------------------------------------------
+      # ÉTAPE 1 : RÉCUPÉRATION OU FORMATAGE (DESTRUCTIF)
+      # -----------------------------------------------------------------
       if blkid -L $LABEL > /dev/null; then
-        echo "✅ Partition $LABEL trouvée."
+        echo "✅ Partition $LABEL trouvée. Les données sont intactes."
       else
-        echo "⚠️ Partition $LABEL introuvable. Recherche d'un disque..."
+        echo "⚠️ Partition $LABEL introuvable. Initialisation d'un nouveau Worker..."
+        # On cherche le premier disque physique disponible (type disk, non-amovible)
         TARGET_DISK=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}' | head -n 1)
+        
+        # Sécurité : Si aucun disque n'est branché, on abandonne proprement
         if [ -z "$TARGET_DISK" ]; then exit 0; fi
         
+        # Formatage complet du disque
         wipefs -a "$TARGET_DISK"
         parted -s "$TARGET_DISK" mklabel gpt mkpart primary ext4 0% 100%
+        
+        # udevadm settle est CRITIQUE ici : il force le système à attendre
+        # que le noyau ait fini de créer les fichiers virtuels de la nouvelle partition
         udevadm settle
+        
         TARGET_PART=$(lsblk -rno NAME "$TARGET_DISK" | awk 'NR==2 {print "/dev/"$1}')
         mkfs.ext4 -L $LABEL "$TARGET_PART"
       fi
 
+      # -----------------------------------------------------------------
+      # ÉTAPE 2 : BIND MOUNTS (PERSISTANCE DES DOSSIERS CRITIQUES)
+      # -----------------------------------------------------------------
       echo "Montage de la partition sur $MOUNT_POINT..."
       mkdir -p $MOUNT_POINT
       if ! mountpoint -q $MOUNT_POINT; then
         mount -L $LABEL $MOUNT_POINT
       fi
       
+      # Persistance de l'identité du nœud K3s
       echo "Persistance du dossier /etc/rancher/node..."
       mkdir -p $MOUNT_POINT/etc_rancher_node
       mkdir -p /etc/rancher/node
@@ -115,6 +136,7 @@
         mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node
       fi
 
+      # Anticipation pour le stockage distribué des futurs pods (Volumes K8s)
       echo "Persistance du dossier Longhorn sur le disque physique..."
       mkdir -p $MOUNT_POINT/longhorn_data
       mkdir -p /var/lib/longhorn
@@ -122,21 +144,23 @@
         mount --bind $MOUNT_POINT/longhorn_data /var/lib/longhorn
       fi
 
-      # --- NOUVEAU : DÉCHIFFREMENT SOPS À LA VOLÉE ---
+      # -----------------------------------------------------------------
+      # ÉTAPE 3 : DÉCHIFFREMENT DES SECRETS À LA VOLÉE (SOPS)
+      # -----------------------------------------------------------------
       echo "Déchiffrement du token K3s avec la clé SSH locale..."
 
-      # Sécurité pour les futurs nouveaux PC : si la clé SSH n'existe pas encore sur le disque, on la génère !
+      # Génération de la clé maître si c'est le tout premier boot de ce PC
       if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
       fi
 
-      # 1. On convertit la clé privée SSH du disque en clé privée Age
+      # Conversion de l'identité SSH en clé Age pour déverrouiller SOPS
       export SOPS_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
 
-      # 2. On déchiffre le fichier yaml et on extrait uniquement le token brut dans un fichier texte
+      # Extraction chirurgicale du mot de passe k3s depuis le coffre-fort YAML
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
 
-      # 3. On sécurise les droits du fichier pour que seul root/k3s puisse le lire
+      # Sécurisation stricte : seul le compte root a le droit de lire ce mot de passe
       chmod 600 $MOUNT_POINT/k3s_token
 
       echo "🚀 Stockage local et secrets prêts ! K3s va pouvoir démarrer."
