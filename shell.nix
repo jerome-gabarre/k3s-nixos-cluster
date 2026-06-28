@@ -5,6 +5,8 @@ pkgs.mkShell {
     rsync
     git
     openssh
+    fluxcd
+    kubectl
   ];
 
   shellHook = ''

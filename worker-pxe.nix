@@ -99,37 +99,40 @@
         disk_name=$(basename "$disk")
         expected_label="K3S_DATA_$disk_name"
         
-        fstype=$(lsblk -d -n -o FSTYPE "$disk")
-        current_label=$(lsblk -d -n -o LABEL "$disk")
+        # 1. Recherche récursive d'un label K3S sur le disque OU ses partitions
+        # lsblk renverra par exemple "/dev/sda1" s'il trouve "K3S_DATA"
+        k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/K3S_DATA/ {print "/dev/"$1}' | head -n 1)
 
-        # -----------------------------------------------------------------
-        # ÉTAPE 1 : FORMATAGE SÉCURISÉ (SAFETY CATCH)
-        # -----------------------------------------------------------------
-        if [ -z "$fstype" ]; then
-          echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
-          wipefs -a "$disk"
-          parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
-          udevadm settle
-          
-          # On récupère la partition fraîchement créée
-          part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
-          mkfs.ext4 -L "$expected_label" "$part_path"
-          current_label="$expected_label"
-
-        elif [[ "$current_label" == K3S_DATA_* ]]; then
-          echo "✅ Disque K3s reconnu : $disk (Label: $current_label)"
-          part_path=$(blkid -L "$current_label")
+        if [ -n "$k3s_part" ]; then
+          # CAS 1 : Disque K3s déjà existant (Ancienne ou nouvelle nomenclature)
+          echo "✅ Disque K3s reconnu : $k3s_part"
+          part_path="$k3s_part"
 
         else
-          echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues (FS=$fstype, LABEL=$current_label)."
-          continue # On passe au disque suivant sans rien casser
+          # CAS 2 : Pas de label K3s. Le disque est-il VRAIMENT vierge ?
+          # On cherche la présence de n'importe quel FS (ext4, vfat) ou Table de Partition (gpt, dos)
+          has_data=$(lsblk -r -n -o FSTYPE,PTTYPE "$disk" | awk 'NF>0' | head -n 1)
+          
+          if [ -z "$has_data" ]; then
+            echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
+            wipefs -af "$disk"
+            parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
+            udevadm settle
+            
+            # On récupère la partition fraîchement créée
+            part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
+            mkfs.ext4 -L "$expected_label" "$part_path"
+          else
+            # CAS 3 : Disque contenant des données non-K3s (Safety Catch FAILED)
+            echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues détectées."
+            continue
+          fi
         fi
 
         # -----------------------------------------------------------------
         # ÉTAPE 2 : DISTRIBUTION DES MONTAGES (K3S vs LONGHORN)
         # -----------------------------------------------------------------
         if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
-          # --- DISQUE 1 : DEVIENT LE DISQUE MAÎTRE K3S ---
           echo "Montage du disque principal sur $MOUNT_POINT..."
           mkdir -p $MOUNT_POINT
           if ! mountpoint -q $MOUNT_POINT; then
@@ -137,7 +140,6 @@
           fi
           PRIMARY_DISK_MOUNTED=true
         else
-          # --- DISQUES SUIVANTS : STOCKAGE BRUT LONGHORN ---
           lh_mount="/var/lib/longhorn/disks/$disk_name"
           echo "Montage du disque d'extension sur $lh_mount..."
           mkdir -p "$lh_mount"
@@ -147,14 +149,13 @@
         fi
       done
 
-      # Sécurité : on abandonne si aucun disque n'est disponible
       if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
         echo "❌ Aucun disque utilisable trouvé pour K3s. Arrêt."
         exit 1
       fi
 
       # -----------------------------------------------------------------
-      # ÉTAPE 3 : BIND MOUNTS (PERSISTANCE DES DOSSIERS CRITIQUES)
+      # ÉTAPE 3 : BIND MOUNTS ET SOPS (PERSISTANCE)
       # -----------------------------------------------------------------
       echo "Persistance de l'identité du noeud..."
       mkdir -p $MOUNT_POINT/etc_rancher_node
@@ -170,9 +171,6 @@
         mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn
       fi
 
-      # -----------------------------------------------------------------
-      # ÉTAPE 4 : DÉCHIFFREMENT DES SECRETS À LA VOLÉE (SOPS)
-      # -----------------------------------------------------------------
       echo "Déchiffrement du token K3s..."
       if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
