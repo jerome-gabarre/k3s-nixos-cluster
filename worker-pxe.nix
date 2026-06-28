@@ -89,81 +89,100 @@
     
     script = ''
       set -e
-      LABEL="K3S_DATA"
       MOUNT_POINT="/var/lib/rancher/k3s"
+      PRIMARY_DISK_MOUNTED=false
       
-      echo "Vérification de la présence d'une partition locale '$LABEL'..."
+      echo "🛡️ DÉMARRAGE DU CHECK DE SÉCURITÉ DES DISQUES (MULTI-DISQUES)"
 
-      # -----------------------------------------------------------------
-      # ÉTAPE 1 : RÉCUPÉRATION OU FORMATAGE (DESTRUCTIF)
-      # -----------------------------------------------------------------
-      if blkid -L $LABEL > /dev/null; then
-        echo "✅ Partition $LABEL trouvée. Les données sont intactes."
-      else
-        echo "⚠️ Partition $LABEL introuvable. Initialisation d'un nouveau Worker..."
-        # On cherche le premier disque physique disponible (type disk, non-amovible)
-        TARGET_DISK=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}' | head -n 1)
+      # On boucle sur tous les disques physiques (non amovibles)
+      for disk in $(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}'); do
+        disk_name=$(basename "$disk")
+        expected_label="K3S_DATA_$disk_name"
         
-        # Sécurité : Si aucun disque n'est branché, on abandonne proprement
-        if [ -z "$TARGET_DISK" ]; then exit 0; fi
-        
-        # Formatage complet du disque
-        wipefs -a "$TARGET_DISK"
-        parted -s "$TARGET_DISK" mklabel gpt mkpart primary ext4 0% 100%
-        
-        # udevadm settle est CRITIQUE ici : il force le système à attendre
-        # que le noyau ait fini de créer les fichiers virtuels de la nouvelle partition
-        udevadm settle
-        
-        TARGET_PART=$(lsblk -rno NAME "$TARGET_DISK" | awk 'NR==2 {print "/dev/"$1}')
-        mkfs.ext4 -L $LABEL "$TARGET_PART"
+        fstype=$(lsblk -d -n -o FSTYPE "$disk")
+        current_label=$(lsblk -d -n -o LABEL "$disk")
+
+        # -----------------------------------------------------------------
+        # ÉTAPE 1 : FORMATAGE SÉCURISÉ (SAFETY CATCH)
+        # -----------------------------------------------------------------
+        if [ -z "$fstype" ]; then
+          echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
+          wipefs -a "$disk"
+          parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
+          udevadm settle
+          
+          # On récupère la partition fraîchement créée
+          part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
+          mkfs.ext4 -L "$expected_label" "$part_path"
+          current_label="$expected_label"
+
+        elif [[ "$current_label" == K3S_DATA_* ]]; then
+          echo "✅ Disque K3s reconnu : $disk (Label: $current_label)"
+          part_path=$(blkid -L "$current_label")
+
+        else
+          echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues (FS=$fstype, LABEL=$current_label)."
+          continue # On passe au disque suivant sans rien casser
+        fi
+
+        # -----------------------------------------------------------------
+        # ÉTAPE 2 : DISTRIBUTION DES MONTAGES (K3S vs LONGHORN)
+        # -----------------------------------------------------------------
+        if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
+          # --- DISQUE 1 : DEVIENT LE DISQUE MAÎTRE K3S ---
+          echo "Montage du disque principal sur $MOUNT_POINT..."
+          mkdir -p $MOUNT_POINT
+          if ! mountpoint -q $MOUNT_POINT; then
+            mount "$part_path" $MOUNT_POINT
+          fi
+          PRIMARY_DISK_MOUNTED=true
+        else
+          # --- DISQUES SUIVANTS : STOCKAGE BRUT LONGHORN ---
+          lh_mount="/var/lib/longhorn/disks/$disk_name"
+          echo "Montage du disque d'extension sur $lh_mount..."
+          mkdir -p "$lh_mount"
+          if ! grep -qs "$lh_mount" /proc/mounts; then
+            mount "$part_path" "$lh_mount"
+          fi
+        fi
+      done
+
+      # Sécurité : on abandonne si aucun disque n'est disponible
+      if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
+        echo "❌ Aucun disque utilisable trouvé pour K3s. Arrêt."
+        exit 1
       fi
 
       # -----------------------------------------------------------------
-      # ÉTAPE 2 : BIND MOUNTS (PERSISTANCE DES DOSSIERS CRITIQUES)
+      # ÉTAPE 3 : BIND MOUNTS (PERSISTANCE DES DOSSIERS CRITIQUES)
       # -----------------------------------------------------------------
-      echo "Montage de la partition sur $MOUNT_POINT..."
-      mkdir -p $MOUNT_POINT
-      if ! mountpoint -q $MOUNT_POINT; then
-        mount -L $LABEL $MOUNT_POINT
-      fi
-      
-      # Persistance de l'identité du nœud K3s
-      echo "Persistance du dossier /etc/rancher/node..."
+      echo "Persistance de l'identité du noeud..."
       mkdir -p $MOUNT_POINT/etc_rancher_node
       mkdir -p /etc/rancher/node
       if ! mountpoint -q /etc/rancher/node; then
         mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node
       fi
 
-      # Anticipation pour le stockage distribué des futurs pods (Volumes K8s)
-      echo "Persistance du dossier Longhorn sur le disque physique..."
-      mkdir -p $MOUNT_POINT/longhorn_data
+      echo "Persistance de l'espace Longhorn par défaut..."
+      mkdir -p $MOUNT_POINT/longhorn_default
       mkdir -p /var/lib/longhorn
       if ! mountpoint -q /var/lib/longhorn; then
-        mount --bind $MOUNT_POINT/longhorn_data /var/lib/longhorn
+        mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn
       fi
 
       # -----------------------------------------------------------------
-      # ÉTAPE 3 : DÉCHIFFREMENT DES SECRETS À LA VOLÉE (SOPS)
+      # ÉTAPE 4 : DÉCHIFFREMENT DES SECRETS À LA VOLÉE (SOPS)
       # -----------------------------------------------------------------
-      echo "Déchiffrement du token K3s avec la clé SSH locale..."
-
-      # Génération de la clé maître si c'est le tout premier boot de ce PC
+      echo "Déchiffrement du token K3s..."
       if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
       fi
 
-      # Conversion de l'identité SSH en clé Age pour déverrouiller SOPS
       export SOPS_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
-
-      # Extraction chirurgicale du mot de passe k3s depuis le coffre-fort YAML
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
-
-      # Sécurisation stricte : seul le compte root a le droit de lire ce mot de passe
       chmod 600 $MOUNT_POINT/k3s_token
 
-      echo "🚀 Stockage local et secrets prêts ! K3s va pouvoir démarrer."
+      echo "🚀 Stockage multi-disques et secrets prêts !"
     '';
   };
 
