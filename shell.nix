@@ -7,6 +7,8 @@ pkgs.mkShell {
     openssh
     fluxcd
     kubectl
+    ssh-to-age
+    sops
   ];
 
   shellHook = ''
