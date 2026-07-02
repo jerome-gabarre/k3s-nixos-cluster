@@ -36,7 +36,13 @@
   # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
   services.openiscsi.enable = true;
   services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
-  environment.systemPackages = with pkgs; [ util-linux nfs-utils openiscsi ];
+  environment.systemPackages = with pkgs; [ 
+    util-linux 
+    nfs-utils 
+    openiscsi 
+    nftables
+    iptables
+  ];
 
   # --- ACTIVATION SSH AVEC IDENTITÉ PERSISTANTE ---
   services.openssh = {
@@ -65,6 +71,7 @@
     role = "agent";
     serverAddr = "https://192.168.10.103:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
+    extraFlags = "--with-node-id";
   };
 
   # =====================================================================
