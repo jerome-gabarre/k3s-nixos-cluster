@@ -77,11 +77,7 @@
   systemd.services.prepare-k3s-disk = {
     description = "Initialisation, montage du disque et déchiffrement SOPS";
     
-    # On garde l'ordonnancement : le script doit s'exécuter AVANT sshd et k3s
     before = [ "k3s.service" "sshd.service" ];
-    
-    # FIX CRITIQUE : On retire "sshd.service" de requiredBy.
-    # Seul K3s dépend impérativement du succès complet (0) du script pour démarrer.
     requiredBy = [ "k3s.service" ];
     
     path = with pkgs;
@@ -99,8 +95,72 @@
       
       echo "🛡️ DÉMARRAGE DU CHECK DE SÉCURITÉ DES DISQUES (MULTI-DISQUES)"
 
-      # [Ton code de boucle lsblk et de montage reste inchangé ici...]
-      # ... (garder CAS 1, CAS 2, CAS 3 et ÉTAPE 2 à l'identique)
+      # --- CORRECTION PXE : SYNCHRONISATION MATÉRIELLE ---
+      # L'OS bootant en RAM, les bus SATA/NVMe sont sondés de manière asynchrone.
+      # On force l'attente de l'initialisation des périphériques.
+      udevadm settle
+      
+      echo "Recherche des disques physiques..."
+      for i in {1..10}; do
+        disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}')
+        if [ -n "$disks" ]; then
+          break
+        fi
+        echo "Disques non prêts, attente ($i/10)..."
+        sleep 1
+      done
+
+      # On boucle sur tous les disques physiques (non amovibles)
+      for disk in $disks; do
+        disk_name=$(basename "$disk")
+        expected_label="K3S_DATA_$disk_name"
+        
+        # 1. Recherche récursive d'un label K3S sur le disque OU ses partitions
+        k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/K3S_DATA/ {print "/dev/"$1}' | head -n 1)
+
+        if [ -n "$k3s_part" ]; then
+          # CAS 1 : Disque K3s déjà existant
+          echo "✅ Disque K3s reconnu : $k3s_part"
+          part_path="$k3s_part"
+
+        else
+          # CAS 2 : Pas de label K3s. Le disque est-il VRAIMENT vierge ?
+          has_data=$(lsblk -r -n -o FSTYPE,PTTYPE "$disk" | awk 'NF>0' | head -n 1)
+          
+          if [ -z "$has_data" ]; then
+            echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
+            wipefs -af "$disk"
+            parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
+            udevadm settle
+            
+            part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
+            mkfs.ext4 -L "$expected_label" "$part_path"
+          else
+            # CAS 3 : Disque contenant des données non-K3s
+            echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues détectées."
+            continue
+          fi
+        fi
+
+        # -----------------------------------------------------------------
+        # ÉTAPE 2 : DISTRIBUTION DES MONTAGES (K3S vs LONGHORN)
+        # -----------------------------------------------------------------
+        if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
+          echo "Montage du disque principal sur $MOUNT_POINT..."
+          mkdir -p $MOUNT_POINT
+          if ! mountpoint -q $MOUNT_POINT; then
+            mount "$part_path" $MOUNT_POINT
+          fi
+          PRIMARY_DISK_MOUNTED=true
+        else
+          lh_mount="/var/lib/longhorn/disks/$disk_name"
+          echo "Montage du disque d'extension sur $lh_mount..."
+          mkdir -p "$lh_mount"
+          if ! grep -qs "$lh_mount" /proc/mounts; then
+            mount "$part_path" "$lh_mount"
+          fi
+        fi
+      done
 
       if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
         echo "❌ Aucun disque utilisable trouvé pour K3s. Arrêt."
@@ -129,7 +189,6 @@
         ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
       fi
 
-      # AJOUT TECH LEAD : On expose la clé publique AGE directement dans le journal de boot
       PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
       echo "🔑 [SOPS-BOOTSTRAP] Clé publique AGE de ce Worker : $PUBLIC_AGE_KEY"
 
