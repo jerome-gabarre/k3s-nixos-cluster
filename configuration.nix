@@ -161,8 +161,23 @@ in
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
 
-  # --- AUTORISER LE RÉSEAU INTERNE KUBERNETES ---
-  networking.firewall.enable = false;
+  # --- SÉCURITÉ : PARE-FEU MASTER ---
+  networking.firewall.enable = true;
+  
+  # Confiance absolue sur les interfaces réseau internes du cluster k3s
+  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
+
+  # Ouverture des ports vitaux pour la grappe
+  networking.firewall.allowedTCPPorts = [ 
+    22    # SSH (Authentification sécurisée par clé configurée)
+    6443  # API Kubernetes k3s (Communication vitale avec les Workers)
+    80    # Ingress HTTP
+    8088  # API/Statut Pixiecore
+  ];
+  
+  networking.firewall.allowedUDPPorts = [
+    8472  # Flannel VXLAN (Communication overlay inter-noeuds k3s)
+  ];
 
   # --- CONFIGURATION RÉSEAU ET WI-FI ---
   # NetworkManager est le standard industriel pour gérer le Wi-Fi facilement
@@ -180,9 +195,6 @@ in
   zramSwap.enable = true;
 
   # --- ORCHESTRATION K3S (NŒUD MAÎTRE) ---
-  
-  # Ouverture du port vital pour que les "Workers" (votre PC) puissent communiquer avec le Master
-  networking.firewall.allowedTCPPorts = [ 6443 80 8088 ];
 
   services.k3s = {
     enable = true;
