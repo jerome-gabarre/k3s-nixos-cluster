@@ -133,21 +133,21 @@ in
 
 
   # Activation du serveur X11 (nécessaire pour l'interface graphique)
-  services.xserver.enable = true;
+  # services.xserver.enable = true;
   # Activation de l'environnement de bureau léger XFCE
-  services.xserver.desktopManager.xfce.enable = true;
+  # services.xserver.desktopManager.xfce.enable = true;
 
-  services.xserver.displayManager.lightdm.greeters.gtk.extraConfig = ''
-    keyboard=onboard
-    show-indicators=~language;~a11y;~session;~power
-  '';
+  # services.xserver.displayManager.lightdm.greeters.gtk.extraConfig = ''
+  #   keyboard=onboard
+  #   show-indicators=~language;~a11y;~session;~power
+  # '';
 
   # Activation du serveur RDP (pour la Connexion Bureau à distance Windows)
-  services.xrdp = {
-    enable = true;
-    defaultWindowManager = "xfce4-session"; # Indique à xrdp de lancer XFCE
-    openFirewall = true; # Ouvre automatiquement le port 3389 dans le pare-feu
-  };
+  # services.xrdp = {
+  #   enable = true;
+  #   defaultWindowManager = "xfce4-session"; # Indique à xrdp de lancer XFCE
+  #   openFirewall = true; # Ouvre automatiquement le port 3389 dans le pare-feu
+  # };
 
   # --- MONTAGE AUTOMATIQUE DU FIRMWARE (OBLIGATOIRE POUR SAUVEGARDE) ---
   fileSystems."/boot/firmware" = {
