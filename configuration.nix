@@ -37,7 +37,7 @@ in
 
   # --- ACTIVATION DE L'ÉMULATION X86_64 (CRITIQUE) ---
   # Permet au Raspberry Pi (ARM) d'assembler l'image pour le PC (Intel/AMD)
-  boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
+  # boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
 
   # --- BOOTLOADER ET NOYAU ---
   boot.loader.grub.enable = false;
