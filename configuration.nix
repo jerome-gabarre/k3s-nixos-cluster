@@ -163,6 +163,9 @@ in
 
   # --- SÉCURITÉ : PARE-FEU MASTER ---
   networking.firewall.enable = true;
+
+  # TOLÉRANCE AU ROUTAGE ASYMÉTRIQUE DU CNI (FLANNEL)
+  networking.firewall.checkReversePath = "loose";
   
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];

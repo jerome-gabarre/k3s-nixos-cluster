@@ -30,8 +30,24 @@
     ln -sfn /run/current-system/sw/bin/iscsiadm /usr/local/bin/iscsiadm
   '';
 
-  # --- AUTORISER LE RÉSEAU INTERNE KUBERNETES ---
-  networking.firewall.enable = false;
+  # --- SÉCURITÉ : PARE-FEU WORKER ---
+  networking.firewall.enable = true;
+
+  # TOLÉRANCE AU ROUTAGE ASYMÉTRIQUE DU CNI (FLANNEL)
+  networking.firewall.checkReversePath = "loose";
+
+  # Confiance absolue sur les interfaces réseau internes du cluster k3s
+  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
+
+  # Ouverture des ports vitaux pour un nœud agent k3s
+  networking.firewall.allowedTCPPorts = [ 
+    22      # Maintenance SSH
+    10250   # API Kubelet (Nécessaire pour les logs, metrics-server et port-forwarding)
+  ];
+
+  networking.firewall.allowedUDPPorts = [
+    8472    # Flannel VXLAN (Communication inter-nœuds)
+  ];
 
   # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
   services.openiscsi.enable = true;
