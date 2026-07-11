@@ -97,6 +97,9 @@
   # Ce script garantit la survie des bases de données (K3s/Longhorn) et des secrets (SOPS)
   # en forçant l'écriture sur le disque dur physique de la machine.
   # =====================================================================
+  # =====================================================================
+  # 1. PRÉPARATION DU STOCKAGE ET DES SECRETS (AVANT K3S)
+  # =====================================================================
   systemd.services.prepare-k3s-disk = {
     description = "Initialisation, montage du disque et déchiffrement SOPS";
     
@@ -115,73 +118,57 @@
       set -e
       MOUNT_POINT="/var/lib/rancher/k3s"
       PRIMARY_DISK_MOUNTED=false
+      JSON_DISKS=""
       
       echo "🛡️ DÉMARRAGE DU CHECK DE SÉCURITÉ DES DISQUES (MULTI-DISQUES)"
-
-      # --- CORRECTION PXE : SYNCHRONISATION MATÉRIELLE ---
-      # L'OS bootant en RAM, les bus SATA/NVMe sont sondés de manière asynchrone.
-      # On force l'attente de l'initialisation des périphériques.
       udevadm settle
       
       echo "Recherche des disques physiques..."
       for i in {1..10}; do
         disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}')
-        if [ -n "$disks" ]; then
-          break
-        fi
+        if [ -n "$disks" ]; then break; fi
         echo "Disques non prêts, attente ($i/10)..."
         sleep 1
       done
 
-      # On boucle sur tous les disques physiques (non amovibles)
       for disk in $disks; do
         disk_name=$(basename "$disk")
         expected_label="K3S_DATA_$disk_name"
         
-        # 1. Recherche récursive d'un label K3S sur le disque OU ses partitions
+        # DÉTECTION MATÉRIELLE (ROTA = 1 pour HDD, 0 pour SSD/NVMe)
+        ROTA=$(lsblk -d -n -o ROTA "$disk" | tr -d ' ')
+        if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
+        
         k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/K3S_DATA/ {print "/dev/"$1}' | head -n 1)
 
         if [ -n "$k3s_part" ]; then
-          # CAS 1 : Disque K3s déjà existant
-          echo "✅ Disque K3s reconnu : $k3s_part"
+          echo "✅ Disque K3s reconnu : $k3s_part ($DISK_TAG)"
           part_path="$k3s_part"
-
         else
-          # CAS 2 : Pas de label K3s. Le disque est-il VRAIMENT vierge ?
           has_data=$(lsblk -r -n -o FSTYPE,PTTYPE "$disk" | awk 'NF>0' | head -n 1)
-          
           if [ -z "$has_data" ]; then
             echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
             wipefs -af "$disk"
             parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
             udevadm settle
-            
             part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
             mkfs.ext4 -L "$expected_label" "$part_path"
           else
-            # CAS 3 : Disque contenant des données non-K3s
             echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues détectées."
             continue
           fi
         fi
 
-        # -----------------------------------------------------------------
-        # ÉTAPE 2 : DISTRIBUTION DES MONTAGES (K3S vs LONGHORN)
-        # -----------------------------------------------------------------
         if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
-          echo "Montage du disque principal sur $MOUNT_POINT..."
           mkdir -p $MOUNT_POINT
-          if ! mountpoint -q $MOUNT_POINT; then
-            mount "$part_path" $MOUNT_POINT
-          fi
+          if ! mountpoint -q $MOUNT_POINT; then mount "$part_path" $MOUNT_POINT; fi
+          JSON_DISKS+="{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]},"
           PRIMARY_DISK_MOUNTED=true
         else
           lh_mount="/var/lib/longhorn/disks/$disk_name"
-          echo "Montage du disque d'extension sur $lh_mount..."
           mkdir -p "$lh_mount"
-          if ! grep -qs "$lh_mount" /proc/mounts; then
-            mount "$part_path" "$lh_mount"
-          fi
+          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$part_path" "$lh_mount"; fi
+          JSON_DISKS+="{\"path\":\"$lh_mount\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\"]},"
         fi
       done
 
@@ -190,37 +177,72 @@
         exit 1
       fi
 
-      # -----------------------------------------------------------------
-      # ÉTAPE 3 : BIND MOUNTS ET SOPS (PERSISTANCE)
-      # -----------------------------------------------------------------
-      echo "Persistance de l'identité du noeud..."
-      mkdir -p $MOUNT_POINT/etc_rancher_node
-      mkdir -p /etc/rancher/node
-      if ! mountpoint -q /etc/rancher/node; then
-        mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node
-      fi
+      mkdir -p $MOUNT_POINT/etc_rancher_node /etc/rancher/node
+      if ! mountpoint -q /etc/rancher/node; then mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node; fi
 
-      echo "Persistance de l'espace Longhorn par défaut..."
-      mkdir -p $MOUNT_POINT/longhorn_default
-      mkdir -p /var/lib/longhorn
-      if ! mountpoint -q /var/lib/longhorn; then
-        mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn
-      fi
+      mkdir -p $MOUNT_POINT/longhorn_default /var/lib/longhorn
+      if ! mountpoint -q /var/lib/longhorn; then mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn; fi
 
-      echo "Vérification/Génération de la clé d'identité..."
-      if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
-        ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
-      fi
+      # Sauvegarde de la structure pour le service de patch API
+      echo "[''${JSON_DISKS%,}]" > /var/lib/longhorn/default-disks.json
 
+      if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q; fi
       PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
-      echo "🔑 [SOPS-BOOTSTRAP] Clé publique AGE de ce Worker : $PUBLIC_AGE_KEY"
-
-      echo "Déchiffrement du token K3s..."
+      
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
       chmod 600 $MOUNT_POINT/k3s_token
+    '';
+  };
 
-      echo "🚀 Stockage multi-disques et secrets prêts !"
+ # =====================================================================
+  # 2. PATCH API LONGHORN (APRÈS K3S)
+  # =====================================================================
+  systemd.services.longhorn-auto-discovery = {
+    description = "Patch API Kubernetes pour l'auto-discovery Longhorn";
+    
+    after = [ "k3s.service" ];
+    wantedBy = [ "multi-user.target" ];
+    
+    path = with pkgs; [ kubectl coreutils ];
+    
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    
+    script = ''
+      # Utilisation du Kubeconfig de l'agent (Kubelet)
+      export KUBECONFIG=/var/lib/rancher/k3s/agent/kubelet.kubeconfig
+      
+      # Lecture directe depuis le noyau (zéro dépendance binaire)
+      BASE_HOSTNAME=$(cat /proc/sys/kernel/hostname)
+      
+      # On attend que le fichier d'ID soit généré par k3s
+      for i in {1..12}; do
+        if [ -f "/etc/rancher/node/id" ]; then break; fi
+        sleep 5
+      done
+      
+      NODE_ID=$(cat /etc/rancher/node/id)
+      NODE_NAME="$BASE_HOSTNAME-$NODE_ID"
+      
+      echo "Attente du démarrage de l'agent K3s local et de l'enregistrement du noeud ($NODE_NAME)..."
+      for i in {1..36}; do
+        if [ -f "$KUBECONFIG" ] && kubectl get node $NODE_NAME > /dev/null 2>&1; then
+          if [ -f "/var/lib/longhorn/default-disks.json" ]; then
+            FINAL_JSON=$(cat /var/lib/longhorn/default-disks.json)
+            echo "API disponible. Injection du payload Longhorn sur $NODE_NAME..."
+            kubectl annotate node $NODE_NAME "node.longhorn.io/default-disks-config=$FINAL_JSON" --overwrite
+            echo "✅ Annotation injectée avec succès."
+            exit 0
+          fi
+        fi
+        sleep 5
+      done
+      
+      echo "❌ Délai dépassé. Impossible d'appliquer l'annotation Longhorn."
+      exit 1
     '';
   };
 
