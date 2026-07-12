@@ -170,6 +170,14 @@ in
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
 
+  # Autorisation du routage inter-pods (Chaîne FORWARD) via injection atomique
+  networking.firewall.extraForwardRules = ''
+    -i cni0 -j ACCEPT
+    -o cni0 -j ACCEPT
+    -i flannel.1 -j ACCEPT
+    -o flannel.1 -j ACCEPT
+  '';
+
   # Ouverture des ports vitaux pour la grappe
   networking.firewall.allowedTCPPorts = [ 
     22    # SSH (Authentification sécurisée par clé configurée)

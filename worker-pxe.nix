@@ -12,6 +12,12 @@
   # Nom générique pour facilement le repérer sur le réseau
   networking.hostName = "nixos-pxe-installer";
 
+  # --- NEUTRALISATION DUAL-STACK DOUCE (SYSTÈME ACTIF, INTERFACES MUETTES) ---
+  boot.kernel.sysctl = {
+    "net.ipv6.conf.all.disable_ipv6" = 1;
+    "net.ipv6.conf.default.disable_ipv6" = 1;
+  };
+
   # On intègre le fichier chiffré dans le système du Worker
   environment.etc."secrets.yaml".source = ./secrets.yaml;
 
@@ -38,6 +44,14 @@
 
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
+
+  # Autorisation du routage inter-pods (Chaîne FORWARD) via injection atomique
+  networking.firewall.extraForwardRules = ''
+    -i cni0 -j ACCEPT
+    -o cni0 -j ACCEPT
+    -i flannel.1 -j ACCEPT
+    -o flannel.1 -j ACCEPT
+  '';
 
   # Ouverture des ports vitaux pour un nœud agent k3s
   networking.firewall.allowedTCPPorts = [ 
