@@ -254,48 +254,49 @@ in
       User = "root";
     };
     script = ''
-      # 1. Variables
-      DATE=$(date +%Y-%m-%d)
-      HOSTNAME=$(hostname)
-      BACKUP_DIR="/tmp/backup_staging"
-      REMOTE="gdrive:NixOS-Backups/$HOSTNAME"
+ # 1. Variables
+ DATE=$(date +%Y-%m-%d)
+ HOSTNAME=$(hostname)
+ BACKUP_DIR="/tmp/backup_staging"
+ REMOTE="gdrive:NixOS-Backups/$HOSTNAME"
 
-      # 2. Préparation
-      rm -rf $BACKUP_DIR
-      mkdir -p $BACKUP_DIR/nixos
-      mkdir -p $BACKUP_DIR/k3s-state
+ # 2. Préparation
+ rm -rf $BACKUP_DIR
+ mkdir -p $BACKUP_DIR/nixos
+ mkdir -p $BACKUP_DIR/k3s-state
 
-      # 3. Copie des fichiers vitaux (Architecture NixOS)
-      echo "Sauvegarde de l'environnement NixOS local..."
-      cp -a /etc/nixos/. $BACKUP_DIR/nixos/
+ # 3. Copie des fichiers vitaux (Architecture NixOS)
+ echo "Sauvegarde de l'environnement NixOS local..."
+ cp -a /etc/nixos/. $BACKUP_DIR/nixos/
+ 
+ # Exclure le lien symbolique 'result' généré par nix-build
+ rm -f $BACKUP_DIR/nixos/result
 
-      if [ -f /boot/firmware/config.txt ]; then
-        echo "Sauvegarde du config.txt..."
-        cp /boot/firmware/config.txt $BACKUP_DIR/
-      fi
+ if [ -f /boot/firmware/config.txt ]; then
+   echo "Sauvegarde du config.txt..."
+   cp /boot/firmware/config.txt $BACKUP_DIR/
+ fi
 
-      # 4. Sauvegarde de l'état K3s (Cerveau du Cluster)
-      echo "Sauvegarde de la base de données K3s et des certificats TLS..."
-      # Dump à chaud de la base SQLite (Garantit l'intégrité de l'archive)
-      sqlite3 /var/lib/rancher/k3s/server/db/state.db ".backup '$BACKUP_DIR/k3s-state/state.db'"
-      
-      # Copie des certificats d'autorité (Évite de devoir recréer les workers en cas de crash)
-      cp -a /var/lib/rancher/k3s/server/tls $BACKUP_DIR/k3s-state/
+ # 4. Sauvegarde de l'état K3s (Cerveau du Cluster)
+ echo "Sauvegarde de la base de données K3s et des certificats TLS..."
+ sqlite3 /var/lib/rancher/k3s/server/db/state.db ".backup '$BACKUP_DIR/k3s-state/state.db'"
+ cp -a /var/lib/rancher/k3s/server/tls $BACKUP_DIR/k3s-state/
 
-      # 5. Envoi Cloud : Sync pour Latest, Copy pour History
-      echo "Upload vers Google Drive..."
-      rclone sync $BACKUP_DIR "$REMOTE/latest"
-      rclone copy $BACKUP_DIR "$REMOTE/history/$DATE"
-      
-      # --- PURGE DES VIEUX FICHIERS (> 30 Jours) ---
-      echo "Nettoyage des archives de plus de 30 jours..."
-      rclone delete "$REMOTE/history" --min-age 30d || true
-      rclone rmdirs "$REMOTE/history" --leave-root || true
-      
-      # 6. Nettoyage local
-      rm -rf $BACKUP_DIR
-      echo "Sauvegarde terminée avec succès."
-    '';
+ # 5. Envoi Cloud : Sync pour Latest, Copy pour History
+ # Ajout du --tpslimit 4 pour ne pas déclencher l'anti-spam de l'API Google
+ echo "Upload vers Google Drive..."
+ rclone sync $BACKUP_DIR "$REMOTE/latest" --tpslimit 4
+ rclone copy $BACKUP_DIR "$REMOTE/history/$DATE" --tpslimit 4
+ 
+ # --- PURGE DES VIEUX FICHIERS (> 30 Jours) ---
+ echo "Nettoyage des archives de plus de 30 jours..."
+ rclone delete "$REMOTE/history" --min-age 30d --tpslimit 4 || true
+ rclone rmdirs "$REMOTE/history" --leave-root --tpslimit 4 || true
+ 
+ # 6. Nettoyage local
+ rm -rf $BACKUP_DIR
+ echo "Sauvegarde terminée avec succès."
+ '';
   };
 
   systemd.timers.backup-config-gdrive = {
