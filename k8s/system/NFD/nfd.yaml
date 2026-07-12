@@ -1,0 +1,41 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: nfd
+  namespace: flux-system
+spec:
+  interval: 24h
+  url: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta2
+kind: HelmRelease
+metadata:
+  name: nfd
+  namespace: flux-system
+spec:
+  interval: 1h
+  targetNamespace: node-feature-discovery
+  install:
+    createNamespace: true
+  chart:
+    spec:
+      chart: node-feature-discovery
+      version: "0.15.4" # Version identique à ton ancien déploiement pour garantir la compatibilité
+      sourceRef:
+        kind: HelmRepository
+        name: nfd
+      interval: 1h
+  values:
+    master:
+      # Exclusion explicite du Raspberry Pi 4
+      tolerations: []
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+    worker:
+      # Le DaemonSet ne scannera que les workers
+      tolerations: []
