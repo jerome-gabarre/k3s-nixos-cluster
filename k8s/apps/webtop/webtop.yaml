@@ -29,16 +29,9 @@ spec:
       labels:
         app: webtop
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: node-role.kubernetes.io/control-plane
-                    operator: DoesNotExist
       containers:
         - name: webtop
-          image: lscr.io/linuxserver/webtop:latest
+          image: lscr.io/linuxserver/webtop:ubuntu-kde-1.0.0 # À remplacer par le tag exact souhaité
           env:
             - name: PUID
               value: "1000"
@@ -49,13 +42,18 @@ spec:
           ports:
             - containerPort: 3001
               name: https
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
-              cpu: 250m
-              memory: 1Gi
+              cpu: 100m
+              memory: 512Mi
             limits:
-              cpu: 2000m
-              memory: 4Gi
+              cpu: 1000m
+              memory: 2Gi
           volumeMounts:
             - name: webtop-config
               mountPath: /config
@@ -70,11 +68,30 @@ metadata:
   name: webtop-svc
   namespace: default
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: webtop
   ports:
     - name: https
       port: 3001
       targetPort: 3001
-      nodePort: 30000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: webtop-ingress
+  namespace: default
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure # À adapter selon ta config Traefik
+spec:
+  rules:
+  - host: webtop.ton-domaine.local # À remplacer par ton FQDN
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: webtop-svc
+            port:
+              number: 3001
