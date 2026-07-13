@@ -23,7 +23,7 @@
 
   # --- CRITIQUE POUR LE MATÉRIEL DE RÉCUPÉRATION ---
   # Charge tous les pilotes propriétaires (Realtek, Intel, Broadcom...)
-  hardware.enableRedistributableFirmware = false;
+  hardware.enableRedistributableFirmware = true;
 
   # --- PARAMÈTRE SYSTÈME OBLIGATOIRE ---
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
@@ -69,6 +69,7 @@
     openiscsi 
     nftables
     iptables
+    xfsprogs
   ];
 
   # --- ACTIVATION SSH AVEC IDENTITÉ PERSISTANTE ---
@@ -118,7 +119,7 @@
     requiredBy = [ "k3s.service" ];
     
     path = with pkgs;
-      [ util-linux parted e2fsprogs systemd gawk sops ssh-to-age openssh ];
+      [ util-linux parted e2fsprogs xfsprogs systemd gawk sops ssh-to-age openssh ];
       
     serviceConfig = {
       Type = "oneshot";
@@ -158,14 +159,18 @@
         else
           has_data=$(lsblk -r -n -o FSTYPE,PTTYPE "$disk" | awk 'NF>0' | head -n 1)
           if [ -z "$has_data" ]; then
-            echo "⚠️ Disque vierge détecté ($disk). Formatage ext4 en cours..."
-            wipefs -af "$disk"
-            parted -s "$disk" mklabel gpt mkpart primary ext4 0% 100%
-            udevadm settle
-            part_path=$(lsblk -rno NAME "$disk" | awk 'NR==2 {print "/dev/"$1}')
-            mkfs.ext4 -L "$expected_label" "$part_path"
+            echo "⚠️ Disque vierge détecté ($disk)."
+            echo "Action manuelle requise sur le worker pour préparer le stockage XFS."
+            echo "Exécute ces commandes :"
+            echo "  parted -s $disk mklabel gpt mkpart primary xfs 0% 100%"
+            echo "  mkfs.xfs -L $expected_label ''${disk}1"
+            continue
           else
             echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues détectées."
+            echo "Action manuelle requise si vous souhaitez formater le disque."
+            echo "Exécute ces commandes :"
+            echo "  parted -s $disk mklabel gpt mkpart primary xfs 0% 100%"
+            echo "  mkfs.xfs -L $expected_label ''${disk}1"
             continue
           fi
         fi

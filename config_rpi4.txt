@@ -12,10 +12,10 @@ avoid_warnings=1
 disable_overscan=1
 
 # --- REGLAGES OVERCLOCKING (2.1 GHz) ---
-over_voltage=6
-arm_freq=2100
-gpu_freq=750
-force_turbo=0
+# over_voltage=6
+# arm_freq=2100
+# gpu_freq=750
+# force_turbo=0
 
 # --- CONFIGURATION ECRAN ---
 # On remet le pilote de secours pour garantir le boot
