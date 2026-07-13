@@ -45,13 +45,7 @@
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
 
-  # Autorisation du routage inter-pods (Chaîne FORWARD) via injection atomique
-  networking.firewall.extraForwardRules = ''
-    -i cni0 -j ACCEPT
-    -o cni0 -j ACCEPT
-    -i flannel.1 -j ACCEPT
-    -o flannel.1 -j ACCEPT
-  '';
+
 
   # Ouverture des ports vitaux pour un nœud agent k3s
   networking.firewall.allowedTCPPorts = [ 
@@ -196,6 +190,12 @@
 
       mkdir -p $MOUNT_POINT/longhorn_default /var/lib/longhorn
       if ! mountpoint -q /var/lib/longhorn; then mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn; fi
+
+      # Persistance de l'état Kubelet (CRITIQUE pour le CSI au reboot PXE)
+      mkdir -p $MOUNT_POINT/kubelet /var/lib/kubelet
+      if ! mountpoint -q /var/lib/kubelet; then mount --bind $MOUNT_POINT/kubelet /var/lib/kubelet; fi
+      # Kubelet requiert explicitement une propagation de montage partagée pour le CSI
+      mount --make-shared /var/lib/kubelet
 
       # Sauvegarde de la structure pour le service de patch API
       echo "[''${JSON_DISKS%,}]" > /var/lib/longhorn/default-disks.json
