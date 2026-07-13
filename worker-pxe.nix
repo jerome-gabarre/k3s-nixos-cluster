@@ -45,12 +45,15 @@
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
 
-
-
   # Ouverture des ports vitaux pour un nœud agent k3s
   networking.firewall.allowedTCPPorts = [ 
     22      # Maintenance SSH
     10250   # API Kubelet (Nécessaire pour les logs, metrics-server et port-forwarding)
+  ];
+
+  # Ouverture de la plage NodePort pour l'accès externe aux applications
+  networking.firewall.allowedTCPPortRanges = [
+    { from = 30000; to = 32767; }
   ];
 
   networking.firewall.allowedUDPPorts = [
@@ -206,57 +209,6 @@
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
       chmod 600 $MOUNT_POINT/k3s_token
-    '';
-  };
-
- # =====================================================================
-  # 2. PATCH API LONGHORN (APRÈS K3S)
-  # =====================================================================
-  systemd.services.longhorn-auto-discovery = {
-    description = "Patch API Kubernetes pour l'auto-discovery Longhorn";
-    
-    after = [ "k3s.service" ];
-    wantedBy = [ "multi-user.target" ];
-    
-    path = with pkgs; [ kubectl coreutils ];
-    
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    
-    script = ''
-      # Utilisation du Kubeconfig de l'agent (Kubelet)
-      export KUBECONFIG=/var/lib/rancher/k3s/agent/kubelet.kubeconfig
-      
-      # Lecture directe depuis le noyau (zéro dépendance binaire)
-      BASE_HOSTNAME=$(cat /proc/sys/kernel/hostname)
-      
-      # On attend que le fichier d'ID soit généré par k3s
-      for i in {1..12}; do
-        if [ -f "/etc/rancher/node/id" ]; then break; fi
-        sleep 5
-      done
-      
-      NODE_ID=$(cat /etc/rancher/node/id)
-      NODE_NAME="$BASE_HOSTNAME-$NODE_ID"
-      
-      echo "Attente du démarrage de l'agent K3s local et de l'enregistrement du noeud ($NODE_NAME)..."
-      for i in {1..36}; do
-        if [ -f "$KUBECONFIG" ] && kubectl get node $NODE_NAME > /dev/null 2>&1; then
-          if [ -f "/var/lib/longhorn/default-disks.json" ]; then
-            FINAL_JSON=$(cat /var/lib/longhorn/default-disks.json)
-            echo "API disponible. Injection du payload Longhorn sur $NODE_NAME..."
-            kubectl annotate node $NODE_NAME "node.longhorn.io/default-disks-config=$FINAL_JSON" --overwrite
-            echo "✅ Annotation injectée avec succès."
-            exit 0
-          fi
-        fi
-        sleep 5
-      done
-      
-      echo "❌ Délai dépassé. Impossible d'appliquer l'annotation Longhorn."
-      exit 1
     '';
   };
 

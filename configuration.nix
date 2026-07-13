@@ -170,14 +170,17 @@ in
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
 
-
-
   # Ouverture des ports vitaux pour la grappe
   networking.firewall.allowedTCPPorts = [ 
     22    # SSH (Authentification sécurisée par clé configurée)
     6443  # API Kubernetes k3s (Communication vitale avec les Workers)
     80    # Ingress HTTP
     8088  # API/Statut Pixiecore
+  ];
+
+  # Ouverture de la plage NodePort pour l'accès externe aux applications
+  networking.firewall.allowedTCPPortRanges = [
+    { from = 30000; to = 32767; }
   ];
   
   networking.firewall.allowedUDPPorts = [
