@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: webtop
-          image: lscr.io/linuxserver/webtop:ubuntu-kde-1.0.0 # À remplacer par le tag exact souhaité
+          image: lscr.io/linuxserver/webtop:ubuntu-kde-version-7b4e9c8c
           env:
             - name: PUID
               value: "1000"
