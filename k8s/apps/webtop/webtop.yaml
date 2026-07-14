@@ -94,4 +94,4 @@ spec:
           service:
             name: webtop-svc
             port:
-              number: 3001
+              number: 3000
