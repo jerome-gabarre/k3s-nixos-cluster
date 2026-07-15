@@ -9,8 +9,22 @@
   # Architecture ciblée : PC Standard
   nixpkgs.hostPlatform = "x86_64-linux";
 
-  # Nom générique pour facilement le repérer sur le réseau
-  networking.hostName = "nixos-pxe-installer";
+  # Génération d'un nom d'hôte déterministe basé sur l'adresse MAC
+  system.activationScripts.deterministic-hostname = lib.stringAfter [ "etc" ] ''
+    # On cible l'interface physique principale (enp3s0)
+    MAC=$(cat /sys/class/net/enp3s0/address 2>/dev/null || echo "unknown")
+    
+    if [ "$MAC" = "14:b3:1f:14:e0:99" ]; then
+      TARGET_HOSTNAME="worker-amd64-01"
+    else
+      # Fallback pour les futurs nœuds s'ils ne sont pas encore déclarés
+      TARGET_HOSTNAME="worker-''${MAC//:/}"
+    fi
+
+    # Application du nom d'hôte
+    echo "$TARGET_HOSTNAME" > /etc/hostname
+    hostname "$TARGET_HOSTNAME"
+  '';
 
   # --- NEUTRALISATION DUAL-STACK DOUCE (SYSTÈME ACTIF, INTERFACES MUETTES) ---
   boot.kernel.sysctl = {
