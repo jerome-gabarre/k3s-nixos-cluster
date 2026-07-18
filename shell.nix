@@ -9,6 +9,7 @@ pkgs.mkShell {
     kubectl
     ssh-to-age
     sops
+    nmap
   ];
 
   shellHook = ''
