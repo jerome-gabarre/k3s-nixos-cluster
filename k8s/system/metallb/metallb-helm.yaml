@@ -28,7 +28,7 @@ spec:
     crds: CreateReplace
   upgrade:
     crds: CreateReplace
-values:
+  values:
     speaker:
       tolerations:
         - key: "node-role.kubernetes.io/control-plane"
