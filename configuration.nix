@@ -217,7 +217,8 @@ in
       "--node-ip=192.168.10.103"
       "--advertise-address=192.168.10.103"
       "--node-label svccontroller.k3s.cattle.io/enable=false"
-
+      # Désactivation du LoadBalancer par défaut (Klipper) pour installer MetalLB
+      "--disable=servicelb"
     ];
   };
 
