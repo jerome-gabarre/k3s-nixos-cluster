@@ -35,7 +35,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: webtop
-          image: lscr.io/linuxserver/webtop:ubuntu-kde-version-7b4e9c8c
+          image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
           env:
             - name: PUID
               value: "1000"
