@@ -1,6 +1,54 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    "docker:enableMajor",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "kubernetes": {
+    "fileMatch": ["k8s/.+\\.yaml$"]
+  },
+  "flux": {
+    "fileMatch": ["k8s/.+\\.yaml$"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Mise à jour des paquets hardcodés dans les fichiers NixOS",
+      "fileMatch": ["\\.nix$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?: versioning=(?<versioning>[a-z-]+))?\\s+[A-Za-z0-9_]+[A-Za-z0-9_-]*\\s*=\\s*[\"']?(?<currentValue>[^\"'\\s;]+)[\"']?;"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["^ghcr\\.io/fluxcd/"],
+      "groupName": "FluxCD ecosystem",
+      "automerge": true,
+      "automergeType": "pr"
+    },
+    {
+      "matchPackageNames": [
+        "longhornio/longhorn-manager",
+        "longhornio/longhorn-ui",
+        "longhornio/longhorn-engine",
+        "longhornio/longhorn-instance-manager"
+      ],
+      "groupName": "Longhorn storage",
+      "automerge": false,
+      "description": "Protection du stockage : nécessite une validation manuelle et une vérification des réplicas."
+    },
+    {
+      "matchPackageNames": ["lscr.io/linuxserver/webtop"],
+      "versioning": "loose",
+      "description": "Permet de gérer les tags personnalisés comme ceux de linuxserver.io"
+    },
+    {
+      "matchDatasources": ["github-actions"],
+      "automerge": true,
+      "groupName": "GitHub Actions"
+    }
   ]
 }
