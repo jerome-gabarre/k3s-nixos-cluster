@@ -206,6 +206,7 @@ in
 
   services.k3s = {
     enable = true;
+    # renovate: datasource=github-releases depName=k3s-io/k3s
     package = pkgs.k3s_1_31;
     role = "server"; # Rôle master
     
