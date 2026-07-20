@@ -1,0 +1,153 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: authelia-data-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authelia-config
+  namespace: default
+data:
+  configuration.yml: |
+    theme: dark
+    jwt_secret: "{{ env \"JWT_SECRET\" }}"
+    default_redirection_url: https://auth.home.arpa
+    server:
+      host: 0.0.0.0
+      port: 9091
+    log:
+      level: info
+    totp:
+      issuer: authelia.home.arpa
+    authentication_backend:
+      ldap:
+        implementation: custom
+        url: ldap://lldap-svc.default.svc.cluster.local:3890
+        timeout: 5s
+        start_tls: false
+        base_dn: dc=home,dc=arpa
+        additional_users_dn: ou=people
+        users_filter: (&({username_attribute}={input})(objectClass=person))
+        additional_groups_dn: ou=groups
+        groups_filter: (member={dn})
+        user: uid=admin,ou=people,dc=home,dc=arpa
+        password: "{{ env \"LLDAP_PASSWORD\" }}"
+    session:
+      name: authelia_session
+      secret: "{{ env \"SESSION_SECRET\" }}"
+      expiration: 3600
+      inactivity: 300
+      domain: home.arpa
+    regulation:
+      max_retries: 3
+      find_time: 120
+      ban_time: 300
+    storage:
+      encryption_key: "{{ env \"STORAGE_ENCRYPTION_KEY\" }}"
+      local:
+        path: /data/authelia.sqlite3
+    notifier:
+      disable_startup_check: true
+      filesystem:
+        filename: /data/notification.txt
+    access_control:
+      default_policy: bypass # Stratégie temporaire (bypass) pour valider le lancement
+      rules:
+        - domain: "*.home.arpa"
+          policy: bypass
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authelia
+  namespace: default
+  labels:
+    app: authelia
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: authelia
+  template:
+    metadata:
+      labels:
+        app: authelia
+    spec:
+      containers:
+        - name: authelia
+          image: authelia/authelia:4.38
+          ports:
+            - containerPort: 9091
+              name: http
+          envFrom:
+            - secretRef:
+                name: authelia-secrets
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 50m
+              memory: 50Mi
+            limits:
+              cpu: 500m
+              memory: 200Mi
+      volumes:
+        - name: config
+          configMap:
+            name: authelia-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: authelia-data-pvc
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                - amd64
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: authelia-svc
+  namespace: default
+spec:
+  selector:
+    app: authelia
+  ports:
+    - name: http
+      port: 9091
+      targetPort: 9091
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: authelia-ingress
+  namespace: default
+spec:
+  rules:
+  - host: auth.home.arpa
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: authelia-svc
+            port:
+              number: 9091

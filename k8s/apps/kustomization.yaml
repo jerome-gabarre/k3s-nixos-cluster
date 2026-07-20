@@ -4,3 +4,4 @@ resources:
   - webtop/webtop.yaml
   - metallb/metallb-config.yaml
   - lldap
+  - authelia
