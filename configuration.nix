@@ -185,6 +185,8 @@ in
   
   networking.firewall.allowedUDPPorts = [
     8472  # Flannel VXLAN (Communication overlay inter-noeuds k3s)
+    51820 # Flannel WireGuard IPv4
+    51821 # Flannel WireGuard IPv6
   ];
 
   # --- CONFIGURATION RÉSEAU ET WI-FI ---
@@ -220,6 +222,8 @@ in
       "--node-label svccontroller.k3s.cattle.io/enable=false"
       # Désactivation du LoadBalancer par défaut (Klipper) pour installer MetalLB
       "--disable=servicelb"
+      # Activation de WireGuard
+      "--flannel-backend=wireguard-native"
     ];
   };
 

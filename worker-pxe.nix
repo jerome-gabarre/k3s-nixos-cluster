@@ -80,6 +80,8 @@
 
   networking.firewall.allowedUDPPorts = [
     8472    # Flannel VXLAN (Communication inter-nœuds)
+    51820   # Flannel WireGuard IPv4
+    51821   # Flannel WireGuard IPv6
   ];
 
   # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
