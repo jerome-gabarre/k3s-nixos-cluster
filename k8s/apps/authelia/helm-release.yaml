@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: authelia
-      version: "0.11.x" # Laisse Renovate ajuster la version exacte ultérieurement
+      version: "0.11.x"
       sourceRef:
         kind: HelmRepository
         name: authelia
@@ -19,31 +19,60 @@ spec:
     crds: CreateReplace
   values:
     pod:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: kubernetes.io/arch
-                operator: In
-                values:
-                - amd64
-      extraEnvFrom:
-        - secretRef:
-            name: authelia-secrets
+      selectors:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                  - amd64
+    
+    # 1. Nouvelle gestion des secrets (montage fichier natif)
+    secret:
+      existingSecret: authelia-secrets
+    
+    # 2. Nouvelle racine de persistance
+    persistence:
+      enabled: true
+      storageClass: longhorn
+      accessModes:
+        - ReadWriteOnce
+      size: 1Gi
+    
+    # 3. Nouvelle structure Ingress
+    ingress:
+      enabled: true
+      className: traefik
+      rulesOverride:
+        - host: auth.home.arpa
+          http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: authelia
+                    port:
+                      number: 80 # Le port service par défaut du chart
+                      
+    # 4. Refonte du ConfigMap
     configMap:
       theme: dark
-      jwt_secret: '{{ env "JWT_SECRET" }}'
-      default_redirection_url: https://auth.home.arpa
       server:
-        host: 0.0.0.0
         port: 9091
       totp:
         issuer: authelia.home.arpa
+      identity_validation:
+        reset_password:
+          secret:
+            path: /secrets/JWT_SECRET
       authentication_backend:
         ldap:
           implementation: custom
-          url: ldap://lldap-svc.default.svc.cluster.local:3890
+          address: ldap://lldap-svc.default.svc.cluster.local:3890
           timeout: 5s
           start_tls: false
           base_dn: dc=home,dc=arpa
@@ -52,38 +81,31 @@ spec:
           additional_groups_dn: ou=groups
           groups_filter: (member={dn})
           user: uid=admin,ou=people,dc=home,dc=arpa
-          password: '{{ env "LLDAP_PASSWORD" }}'
+          password:
+            path: /secrets/LLDAP_PASSWORD
       session:
         name: authelia_session
-        secret: '{{ env "SESSION_SECRET" }}'
         expiration: 3600
         inactivity: 300
-        domain: home.arpa
+        encryption_key:
+          path: /secrets/SESSION_SECRET
+        cookies:
+          - domain: home.arpa
+            subdomain: auth
+            default_redirection_url: https://auth.home.arpa
       storage:
-        encryption_key: '{{ env "STORAGE_ENCRYPTION_KEY" }}'
+        encryption_key:
+          path: /secrets/STORAGE_ENCRYPTION_KEY
         local:
+          enabled: true
           path: /data/authelia.sqlite3
       notifier:
         disable_startup_check: true
         filesystem:
+          enabled: true
           filename: /data/notification.txt
       access_control:
-        default_policy: bypass # Stratégie permissive pour valider le premier lancement
+        default_policy: bypass
         rules:
           - domain: "*.home.arpa"
             policy: bypass
-    ingress:
-      enabled: true
-      className: traefik
-      hosts:
-        - host: auth.home.arpa
-          paths:
-            - path: /
-              pathType: Prefix
-    persistence:
-      data:
-        enabled: true
-        storageClass: longhorn
-        accessMode: ReadWriteOnce
-        size: 1Gi
-        mountPath: /data
