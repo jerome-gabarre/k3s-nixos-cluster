@@ -45,19 +45,7 @@ spec:
     # 3. Nouvelle structure Ingress
     ingress:
       enabled: true
-      className: traefik
-      rulesOverride:
-        - host: auth.home.arpa
-          http:
-            paths:
-              - path: /
-                pathType: Prefix
-                backend:
-                  service:
-                    name: authelia
-                    port:
-                      number: 80 # Le port service par défaut du chart
-                      
+                           
     # 4. Refonte du ConfigMap
     configMap:
       theme: dark
