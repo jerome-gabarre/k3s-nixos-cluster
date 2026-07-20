@@ -6,16 +6,22 @@
     "helpers:pinGitHubActionDigests"
   ],
   "kubernetes": {
-    "fileMatch": ["k8s/.+\\.yaml$"]
+    "managerFilePatterns": [
+      "/k8s/.+\\.yaml$/"
+    ]
   },
   "flux": {
-    "fileMatch": ["k8s/.+\\.yaml$"]
+    "managerFilePatterns": [
+      "/k8s/.+\\.yaml$/"
+    ]
   },
   "customManagers": [
     {
       "customType": "regex",
       "description": "Mise à jour des packages NixOS (format pkgs.nom_version)",
-      "fileMatch": ["\\.nix$"],
+      "managerFilePatterns": [
+        "/\\.nix$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?: versioning=(?<versioning>[a-z-]+))?\\s+package\\s*=\\s*pkgs\\.[a-zA-Z0-9]+_(?<currentValue>[0-9_]+);"
       ],
@@ -25,10 +31,12 @@
   ],
   "packageRules": [
     {
-      "matchPackagePatterns": ["^ghcr\\.io/fluxcd/"],
       "groupName": "FluxCD ecosystem",
       "automerge": true,
-      "automergeType": "pr"
+      "automergeType": "pr",
+      "matchPackageNames": [
+        "/^ghcr\\.io/fluxcd//"
+      ]
     },
     {
       "matchPackageNames": [
