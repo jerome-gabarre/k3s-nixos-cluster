@@ -3,7 +3,7 @@ keys:
   - &worker_key age103m56fylzmgf4j39kxnvyn0tarfxvtzmfxafj227pxn43z0rcgtqnfgfpz
 
 creation_rules:
-  - path_regex: secrets.yaml$
+  - path_regex: (secrets\.yaml|.*-sops\.yaml)$
     key_groups:
       - age:
           - *master_key
