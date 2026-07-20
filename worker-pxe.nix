@@ -114,6 +114,10 @@
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master" 
     ];
   };
+
+  # --- OPTIMISATION MÉMOIRE (OS EN RAM) ---
+  zramSwap.enable = true;
+
   # --- 1. CONFIGURATION DE L'AGENT K3S ---
    services.k3s = {
     enable = true;
@@ -122,6 +126,13 @@
     role = "agent";
     serverAddr = "https://192.168.10.103:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
+
+  # Sécurisation RAM via seuils d'éviction Kubelet
+    extraFlags = toString [
+      "--kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%"
+      "--kubelet-arg=eviction-soft=memory.available<1Gi"
+      "--kubelet-arg=eviction-soft-grace-period=memory.available=1m"
+    ];
   };
 
   # =====================================================================
