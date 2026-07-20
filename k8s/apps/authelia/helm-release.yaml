@@ -8,7 +8,7 @@ spec:
   chart:
     spec:
       chart: authelia
-      version: "0.9.x" # Laisse Renovate ajuster la version exacte ultérieurement
+      version: "0.11.x" # Laisse Renovate ajuster la version exacte ultérieurement
       sourceRef:
         kind: HelmRepository
         name: authelia
