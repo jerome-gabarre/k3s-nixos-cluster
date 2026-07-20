@@ -42,6 +42,13 @@ spec:
     ingress:
       enabled: true
       className: traefik
+
+    secret:
+      existingSecret: authelia-secrets
+      additionalSecrets:
+        authelia-secrets:
+          # Le chart montera automatiquement ce secret dans /secrets
+          path: /secrets
                            
     # Refonte du ConfigMap avec montage dynamique des secrets par clé
     configMap:
