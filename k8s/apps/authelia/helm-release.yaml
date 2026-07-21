@@ -92,12 +92,12 @@ spec:
           path: STORAGE_ENCRYPTION_KEY
         local:
           enabled: true
-          path: /data/authelia.sqlite3
+          path: /config/authelia.sqlite3
       notifier:
         disable_startup_check: true
         filesystem:
           enabled: true
-          filename: /data/notification.txt
+          filename: /config/notification.txt
       access_control:
         default_policy: bypass
         rules:
