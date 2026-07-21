@@ -46,9 +46,7 @@ spec:
     secret:
       existingSecret: authelia-secrets
       additionalSecrets:
-        authelia-secrets:
-          # Le chart montera automatiquement ce secret dans /secrets
-          path: /secrets
+        authelia-secrets: {} # Laisse le chart créer le dossier /secrets/authelia-secrets/
                            
     # Refonte du ConfigMap avec montage dynamique des secrets par clé
     configMap:
@@ -64,6 +62,7 @@ spec:
             path: JWT_SECRET
       authentication_backend:
         ldap:
+          enabled: true # <-- Activation explicite requise
           implementation: custom
           address: ldap://lldap-svc.default.svc.cluster.local:3890
           timeout: 5s
@@ -85,9 +84,8 @@ spec:
           secret_name: authelia-secrets
           path: SESSION_SECRET
         cookies:
-          - domain: home.arpa
-            subdomain: auth
-            default_redirection_url: https://auth.home.arpa
+          - domain: auth.home.arpa # <-- Correction du domaine cookie
+            # default_redirection_url supprimé pour éviter la boucle
       storage:
         encryption_key:
           secret_name: authelia-secrets
