@@ -19,6 +19,8 @@ spec:
     crds: CreateReplace
   values:
     pod:
+      kind: Deployment
+      replicas: 1
       selectors:
         affinity:
           nodeAffinity:
