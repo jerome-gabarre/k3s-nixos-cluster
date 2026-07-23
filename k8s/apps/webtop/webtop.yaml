@@ -94,7 +94,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure # À adapter selon ta config Traefik
 spec:
   rules:
-  - host: webtop.ton-domaine.local # À remplacer par ton FQDN
+  - host: webtop.home.arpa
     http:
       paths:
       - path: /

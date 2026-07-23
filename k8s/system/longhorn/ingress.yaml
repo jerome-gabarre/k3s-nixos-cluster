@@ -6,7 +6,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-  - host: longhorn.local
+  - host: longhorn.home.arpa
     http:
       paths:
       - path: /
