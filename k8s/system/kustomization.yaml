@@ -5,3 +5,4 @@ resources:
   - longhorn
   - NFD
   - metallb
+  - traefik
