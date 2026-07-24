@@ -29,9 +29,20 @@ spec:
       labels:
         app: lldap
     spec:
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: lldap
           image: lldap/lldap:latest
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 3890
               name: ldap
@@ -55,6 +66,8 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
@@ -66,6 +79,8 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: lldap-data-pvc
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
