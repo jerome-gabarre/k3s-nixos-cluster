@@ -70,10 +70,6 @@ spec:
               value: "dc=home,dc=arpa"
             - name: LLDAP_HTTP_URL
               value: "http://lldap.home.arpa"
-            - name: LLDAP_FORCE_UPDATE_PRIVATE_KEY
-              value: "true"
-            - name: LLDAP_FORCE_LDAP_USER_PASS_RESET
-              value: "true"
           volumeMounts:
             - name: data
               mountPath: /data
