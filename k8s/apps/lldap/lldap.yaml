@@ -35,7 +35,7 @@ spec:
         - name: lldap
           image: lldap/lldap:latest
           command: ["/app/lldap"]
-          args: ["run"]s
+          args: ["run"]
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
