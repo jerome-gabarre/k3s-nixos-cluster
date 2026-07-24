@@ -52,6 +52,8 @@ spec:
             - containerPort: 17170
               name: http
           env:
+            - name: LLDAP_DATABASE_URL
+              value: "sqlite:///data/users.db" # 3 slashes pour un chemin absolu
             - name: LLDAP_KEY_FILE
               value: "/data/server_key" # Redirige l'écriture vers le stockage Longhorn
             - name: LLDAP_JWT_SECRET
