@@ -29,6 +29,7 @@ spec:
       labels:
         app: lldap
     spec:
+      enableServiceLinks: false # Stoppe l'injection des variables LLDAP_SVC_*
       securityContext:
         fsGroup: 1000
       containers:
@@ -51,6 +52,8 @@ spec:
             - containerPort: 17170
               name: http
           env:
+            - name: LLDAP_KEY_FILE
+              value: "/data/server_key" # Redirige l'écriture vers le stockage Longhorn
             - name: LLDAP_JWT_SECRET
               valueFrom:
                 secretKeyRef:
