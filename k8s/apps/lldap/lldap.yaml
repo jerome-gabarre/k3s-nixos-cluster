@@ -34,6 +34,8 @@ spec:
       containers:
         - name: lldap
           image: lldap/lldap:latest
+          command: ["/app/lldap"]
+          args: ["run"]s
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
