@@ -167,66 +167,64 @@
       PRIMARY_DISK_MOUNTED=false
       JSON_DISKS=""
       
-      echo "🛡️ DÉMARRAGE DU CHECK DE SÉCURITÉ DES DISQUES (MULTI-DISQUES)"
+      echo "🛡️ DÉMARRAGE DU PROVISIONNEMENT ZERO-TOUCH DES DISQUES"
       udevadm settle
       
-      echo "Recherche des disques physiques..."
-      for i in {1..10}; do
-        disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}')
-        if [ -n "$disks" ]; then break; fi
-        echo "Disques non prêts, attente ($i/10)..."
-        sleep 1
-      done
-
+      # Récupérer tous les disques physiques (exclut la RAM, les loop devices)
+      disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}')
+      
+      if [ -z "$disks" ]; then
+        echo "❌ Aucun disque physique trouvé. Arrêt."
+        exit 1
+      fi
+      
       for disk in $disks; do
         disk_name=$(basename "$disk")
-        expected_label="K3S_DATA_$disk_name"
         
-        # DÉTECTION MATÉRIELLE (ROTA = 1 pour HDD, 0 pour SSD/NVMe)
+        # Génération d'un suffixe unique basé sur le serial (XFS limite les labels à 12 caractères)
+        id=$(udevadm info --query=property --name="$disk" | grep -E '^ID_SERIAL_SHORT=' | cut -d= -f2 | tail -c 8 || echo "$RANDOM")
+        expected_label="LH_$id"
+        
+        # Vérifier si une partition avec notre prefixe LH_ existe sur ce disque
+        k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/LH_/ {print "/dev/"$1}' | head -n 1)
+        
+        if [ -z "$k3s_part" ]; then
+          echo "⚠️ Nouveau disque vierge ou inconnu détecté ($disk). Formatage destructif en cours..."
+          # Destruction totale des signatures existantes (ext4, swap, mbr, gpt)
+          wipefs -a "$disk"
+          parted -s "$disk" mklabel gpt mkpart primary xfs 0% 100%
+          udevadm settle
+          
+          # Gestion du nommage des partitions (sdX1 vs nvme0n1p1)
+          if [[ "$disk" == *nvme* || "$disk" == *mmcblk* ]]; then
+            k3s_part="''${disk}p1"
+          else
+            k3s_part="''${disk}1"
+          fi
+          
+          mkfs.xfs -L "$expected_label" "$k3s_part"
+          echo "✅ Disque $disk formaté (Label: $expected_label)."
+        else
+          echo "✅ Disque $disk déjà provisionné pour K3s/Longhorn : $k3s_part"
+        fi
+        
+        # Détection matérielle pour le tag Longhorn
         ROTA=$(lsblk -d -n -o ROTA "$disk" | tr -d ' ')
         if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
         
-        k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/K3S_DATA/ {print "/dev/"$1}' | head -n 1)
-
-        if [ -n "$k3s_part" ]; then
-          echo "✅ Disque K3s reconnu : $k3s_part ($DISK_TAG)"
-          part_path="$k3s_part"
-        else
-          has_data=$(lsblk -r -n -o FSTYPE,PTTYPE "$disk" | awk 'NF>0' | head -n 1)
-          if [ -z "$has_data" ]; then
-            echo "⚠️ Disque vierge détecté ($disk)."
-            echo "Action manuelle requise sur le worker pour préparer le stockage XFS."
-            echo "Exécute ces commandes :"
-            echo "  parted -s $disk mklabel gpt mkpart primary xfs 0% 100%"
-            echo "  mkfs.xfs -L $expected_label ''${disk}1"
-            continue
-          else
-            echo "🚨 ALERTE CRITIQUE : Disque $disk ignoré. Données inconnues détectées."
-            echo "Action manuelle requise si vous souhaitez formater le disque."
-            echo "Exécute ces commandes :"
-            echo "  parted -s $disk mklabel gpt mkpart primary xfs 0% 100%"
-            echo "  mkfs.xfs -L $expected_label ''${disk}1"
-            continue
-          fi
-        fi
-
+        # Montage dynamique
         if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
           mkdir -p $MOUNT_POINT
-          if ! mountpoint -q $MOUNT_POINT; then mount "$part_path" $MOUNT_POINT; fi
+          if ! mountpoint -q $MOUNT_POINT; then mount "$k3s_part" $MOUNT_POINT; fi
           JSON_DISKS+="{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]},"
           PRIMARY_DISK_MOUNTED=true
         else
           lh_mount="/var/lib/longhorn/disks/$disk_name"
           mkdir -p "$lh_mount"
-          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$part_path" "$lh_mount"; fi
+          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$k3s_part" "$lh_mount"; fi
           JSON_DISKS+="{\"path\":\"$lh_mount\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\"]},"
         fi
       done
-
-      if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
-        echo "❌ Aucun disque utilisable trouvé pour K3s. Arrêt."
-        exit 1
-      fi
 
       mkdir -p $MOUNT_POINT/etc_rancher_node /etc/rancher/node
       if ! mountpoint -q /etc/rancher/node; then mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node; fi
@@ -237,7 +235,6 @@
       # Persistance de l'état Kubelet (CRITIQUE pour le CSI au reboot PXE)
       mkdir -p $MOUNT_POINT/kubelet /var/lib/kubelet
       if ! mountpoint -q /var/lib/kubelet; then mount --bind $MOUNT_POINT/kubelet /var/lib/kubelet; fi
-      # Kubelet requiert explicitement une propagation de montage partagée pour le CSI
       mount --make-shared /var/lib/kubelet
 
       # Sauvegarde de la structure pour le service de patch API
