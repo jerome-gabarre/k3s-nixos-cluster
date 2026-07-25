@@ -22,6 +22,19 @@ spec:
   values:
     deployment:
       replicas: 1 # A augmenter avec le nombre de workers
+    # 1. Garantie que Traefik ne tourne que sur un Worker
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+    # 2. Optimisation du routage réseau MetalLB -> Worker
+    service:
+      type: LoadBalancer
+      spec:
+        externalTrafficPolicy: Local
     providers:
       kubernetesCRD:
         enabled: true
