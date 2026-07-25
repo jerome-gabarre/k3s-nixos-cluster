@@ -30,8 +30,11 @@ spec:
     crds: CreateReplace
   values:
     speaker:
-      tolerations:
-        - key: "CriticalAddonsOnly"
-          operator: "Equal"
-          value: "true"
-          effect: "NoExecute"
+      tolerations: [] # Écrase les tolérances par défaut du chart Helm
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
