@@ -1,6 +1,6 @@
 keys:
   - &master_key age1qmlxfhscaexxqeaw59aqc66r2qce2suxge537pm7rtc8w7glp98s9xgny7
-  - &worker_key age103m56fylzmgf4j39kxnvyn0tarfxvtzmfxafj227pxn43z0rcgtqnfgfpz
+  - &worker_key age1g23xsh3z7qhcn67qf3l8q4ej4kyd50zpfuj9av3k79xj4w7kxyvs20lzg5
 
 creation_rules:
   - path_regex: (secrets\.yaml|.*-sops\.yaml)$
