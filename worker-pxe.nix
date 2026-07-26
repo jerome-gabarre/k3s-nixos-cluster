@@ -165,7 +165,7 @@
       udevadm settle
       
       # Récupérer tous les disques physiques (exclut la RAM, les loop devices)
-      disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" {print $1}')
+      disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" && $1 !~ /zram|loop/ {print $1}')
       
       if [ -z "$disks" ]; then
         echo "❌ Aucun disque physique trouvé. Arrêt."
