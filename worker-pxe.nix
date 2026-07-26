@@ -196,7 +196,7 @@
             k3s_part="''${disk}1"
           fi
           
-          mkfs.xfs -L "$expected_label" "$k3s_part"
+          mkfs.xfs -f -L "$expected_label" "$k3s_part"
           echo "✅ Disque $disk formaté (Label: $expected_label)."
         else
           echo "✅ Disque $disk déjà provisionné pour K3s/Longhorn : $k3s_part"
