@@ -36,6 +36,12 @@ spec:
       containers:
         - name: webtop
           image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
+          # --- DURCISSEMENT CONTENEUR ---
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: PUID
               value: "1000"
