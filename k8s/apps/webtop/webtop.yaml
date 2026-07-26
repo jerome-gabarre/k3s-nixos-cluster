@@ -39,9 +39,6 @@ spec:
           # --- DURCISSEMENT CONTENEUR ---
           securityContext:
             allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
           env:
             - name: PUID
               value: "1000"
