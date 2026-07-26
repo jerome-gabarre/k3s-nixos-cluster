@@ -34,12 +34,6 @@
     '';
   };
 
-  # --- NEUTRALISATION DUAL-STACK DOUCE (SYSTÈME ACTIF, INTERFACES MUETTES) ---
-  boot.kernel.sysctl = {
-    "net.ipv6.conf.all.disable_ipv6" = 1;
-    "net.ipv6.conf.default.disable_ipv6" = 1;
-  };
-
   # On intègre le fichier chiffré dans le système du Worker
   environment.etc."secrets.yaml".source = ./secrets.yaml;
 
@@ -51,12 +45,11 @@
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
 
-  # --- CONTOURNEMENT POUR LONGHORN SUR NIXOS ---
-  system.activationScripts.longhorn-iscsi = ''
-    mkdir -p /usr/bin /usr/local/bin
-    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/bin/iscsiadm
-    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/local/bin/iscsiadm
-  '';
+  # Création déclarative des liens symboliques attendus par Longhorn
+  systemd.tmpfiles.rules = [
+    "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
+    "L+ /usr/local/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
+  ];
 
   # --- SÉCURITÉ : PARE-FEU WORKER ---
   networking.firewall.enable = true;
@@ -129,11 +122,12 @@
     serverAddr = "https://192.168.10.103:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
 
-  # Sécurisation RAM via seuils d'éviction Kubelet
+  # Sécurisation RAM/Disque via seuils d'éviction Kubelet dynamiques (%)
     extraFlags = toString [
-      "--kubelet-arg=eviction-hard=memory.available<500Mi,nodefs.available<10%"
-      "--kubelet-arg=eviction-soft=memory.available<1Gi"
-      "--kubelet-arg=eviction-soft-grace-period=memory.available=1m"
+      "--kubelet-arg=eviction-hard=memory.available<5%,nodefs.available<10%,nodefs.inodesFree<5%,imagefs.available<10%"
+      "--kubelet-arg=eviction-soft=memory.available<10%,nodefs.available<15%"
+      "--kubelet-arg=eviction-soft-grace-period=memory.available=2m,nodefs.available=2m"
+      "--kubelet-arg=eviction-max-pod-grace-period=120"
     ];
   };
 

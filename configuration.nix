@@ -57,12 +57,14 @@ in
   hardware.deviceTree.enable = false;
   hardware.i2c.enable = true;
 
-  # --- CONTOURNEMENT POUR LONGHORN SUR NIXOS ---
-  system.activationScripts.longhorn-iscsi = ''
-    mkdir -p /usr/bin /usr/local/bin
-    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/bin/iscsiadm
-    ln -sfn /run/current-system/sw/bin/iscsiadm /usr/local/bin/iscsiadm
-  '';
+  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
+  services.openiscsi.enable = true;
+  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
+
+  systemd.tmpfiles.rules = [
+    "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
+    "L+ /usr/local/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
+  ];
 
   # --- ALLOCATION RAM VIDEO ET MODULES ---
   boot.kernelModules = [ 
@@ -328,10 +330,6 @@ in
     # Les paramètres passés au noyau du worker au démarrage
     cmdLine = "init=${workerImage.config.system.build.toplevel}/init loglevel=4";
   };
-
-  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
-  services.openiscsi.enable = true;
-  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
 
   # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
   nix = {
