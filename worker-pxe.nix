@@ -175,31 +175,28 @@
       for disk in $disks; do
         disk_name=$(basename "$disk")
         
-        # Génération d'un suffixe unique basé sur le serial (XFS limite les labels à 12 caractères)
-        # 1. Priorité au WWN (idéal pour SAN/Virtual-Disks)
+        # Génération d'un suffixe unique
         raw_id=$(lsblk -d -n -o WWN "$disk" | tr -d ' ')
-        
-        # 2. Fallback sur le SERIAL (idéal pour disques physiques)
         [ -z "$raw_id" ] && raw_id=$(lsblk -d -n -o SERIAL "$disk" | tr -d ' ')
-        
-        # 3. Fallback déterministe absolu (hash du path) au lieu de $RANDOM
         [ -z "$raw_id" ] && raw_id=$(echo -n "$disk" | sha1sum | cut -c1-8)
         
-        # Nettoyage et troncature à 8 caractères pour le label XFS (max 12 chars)
         id=$(echo "$raw_id" | sed 's/[^a-zA-Z0-9]//g' | tail -c 8)
         expected_label="LH_$id"
         
-        # Vérifier si une partition avec notre prefixe LH_ existe sur ce disque
         k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/LH_/ {print "/dev/"$1}' | head -n 1)
+        FS_DETECTED=$(lsblk -f -n -o FSTYPE "$disk" | tr -d ' ' | grep -v '^$')
         
-        if [ -z "$k3s_part" ]; then
-          echo "⚠️ Nouveau disque vierge ou inconnu détecté ($disk). Formatage destructif en cours..."
-          # Destruction totale des signatures existantes (ext4, swap, mbr, gpt)
+        if [ -n "$k3s_part" ]; then
+          echo "✅ Disque $disk déjà provisionné pour K3s/Longhorn : $k3s_part"
+        elif [ -n "$FS_DETECTED" ]; then
+          echo "⚠️ Le disque $disk contient déjà des données ($FS_DETECTED). Formatage ignoré par sécurité."
+          continue
+        else
+          echo "⚠️ Nouveau disque vierge détecté ($disk). Formatage destructif en cours..."
           wipefs -a "$disk"
           parted -s "$disk" mklabel gpt mkpart primary xfs 0% 100%
           udevadm settle
           
-          # Gestion du nommage des partitions (sdX1 vs nvme0n1p1)
           if [[ "$disk" == *nvme* || "$disk" == *mmcblk* ]]; then
             k3s_part="''${disk}p1"
           else
@@ -207,16 +204,12 @@
           fi
           
           mkfs.xfs -f -L "$expected_label" "$k3s_part"
-          echo "✅ Disque $disk formaté (Label: $expected_label)."
-        else
-          echo "✅ Disque $disk déjà provisionné pour K3s/Longhorn : $k3s_part"
+          echo "✅ Disque $disk formaté."
         fi
         
-        # Détection matérielle pour le tag Longhorn
         ROTA=$(lsblk -d -n -o ROTA "$disk" | tr -d ' ')
         if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
         
-        # Montage dynamique
         if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
           mkdir -p $MOUNT_POINT
           if ! mountpoint -q $MOUNT_POINT; then mount "$k3s_part" $MOUNT_POINT; fi
@@ -236,12 +229,10 @@
       mkdir -p $MOUNT_POINT/longhorn_default /var/lib/longhorn
       if ! mountpoint -q /var/lib/longhorn; then mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn; fi
 
-      # Persistance de l'état Kubelet (CRITIQUE pour le CSI au reboot PXE)
       mkdir -p $MOUNT_POINT/kubelet /var/lib/kubelet
       if ! mountpoint -q /var/lib/kubelet; then mount --bind $MOUNT_POINT/kubelet /var/lib/kubelet; fi
       mount --make-shared /var/lib/kubelet
 
-      # Sauvegarde de la structure pour le service de patch API
       echo "[''${JSON_DISKS%,}]" > /var/lib/longhorn/default-disks.json
 
       if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q; fi
