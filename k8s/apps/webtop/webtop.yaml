@@ -36,24 +36,11 @@ spec:
       containers:
         - name: webtop
           image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
-          # --- DURCISSEMENT CONTENEUR ---
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             runAsUser: 1000
             runAsGroup: 1000
-          volumeMounts:
-            - name: webtop-config
-               mountPath: /config
-            - name: tmp
-              mountPath: /tmp
-            - name: var-run
-              mountPath: /var/run
-      volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: var-run
-          emptyDir: {}
           env:
             - name: PUID
               value: "1000"
@@ -74,10 +61,18 @@ spec:
           volumeMounts:
             - name: webtop-config
               mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+            - name: var-run
+              mountPath: /var/run
       volumes:
         - name: webtop-config
           persistentVolumeClaim:
             claimName: webtop-config-pvc
+        - name: tmp
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
