@@ -20,15 +20,25 @@
       RemainAfterExit = true;
     };
     # Injection des binaires nécessaires dans le $PATH du service
-    path = [ pkgs.nettools ]; 
+    path = with pkgs; [ nettools iproute2 gawk coreutils ]; 
     script = ''
+      # Attente de la table de routage DHCP
+      sleep 2
       DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}')
-      MAC=$(cat /sys/class/net/$DEFAULT_IFACE/address 2>/dev/null | tr -d ':' || echo "unknown")
       
-      if [ "$MAC" = "14:b3:1f:14:e0:99" ]; then
+      # Fallback si la route est lente à monter
+      if [ -z "$DEFAULT_IFACE" ]; then
+        DEFAULT_IFACE=$(ls /sys/class/net | grep -E '^en|^eth' | head -n 1)
+      fi
+
+      # Extraction propre
+      MAC_RAW=$(cat "/sys/class/net/$DEFAULT_IFACE/address" 2>/dev/null || echo "unknown")
+      
+      if [ "$MAC_RAW" = "14:b3:1f:14:e0:99" ]; then
         TARGET_HOSTNAME="worker-amd64-01"
       else
-        TARGET_HOSTNAME="worker-''${MAC//:/}"
+        MAC_CLEAN=$(echo "$MAC_RAW" | tr -d ':')
+        TARGET_HOSTNAME="worker-$MAC_CLEAN"
       fi
 
       hostname "$TARGET_HOSTNAME"
@@ -186,7 +196,7 @@
       MOUNT_POINT="/var/lib/rancher/k3s"
       PRIMARY_DISK_MOUNTED=false
       JSON_DISKS=""
-      TARGET_LABEL="LONGHORN_DATA"
+      TARGET_LABEL="LONGHORN_DAT"
       
       echo "🛡️ DÉMARRAGE DU PROVISIONNEMENT DÉTERMINISTE DES DISQUES"
       udevadm settle
