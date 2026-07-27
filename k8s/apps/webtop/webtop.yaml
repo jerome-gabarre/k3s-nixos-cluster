@@ -69,10 +69,6 @@ spec:
         - name: webtop-config
           persistentVolumeClaim:
             claimName: webtop-config-pvc
-        - name: tmp
-          emptyDir: {}
-        - name: var-run
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
