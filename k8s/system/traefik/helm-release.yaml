@@ -21,7 +21,7 @@ spec:
         namespace: flux-system
   values:
     deployment:
-      replicas: 1 # A augmenter avec le nombre de workers
+      kind: DaemonSet
     # 1. Garantie que Traefik ne tourne que sur un Worker
     affinity:
       nodeAffinity:
