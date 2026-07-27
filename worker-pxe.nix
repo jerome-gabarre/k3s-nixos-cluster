@@ -58,7 +58,7 @@
   networking.firewall.checkReversePath = "loose";
 
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
-  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
+  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
 
   # Ouverture des ports vitaux pour un nœud agent k3s
   networking.firewall.allowedTCPPorts = [ 

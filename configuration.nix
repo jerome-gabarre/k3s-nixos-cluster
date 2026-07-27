@@ -170,8 +170,7 @@ in
   networking.firewall.checkReversePath = "loose";
   
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
-  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" ];
-
+  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
   # Ouverture des ports vitaux pour la grappe
   networking.firewall.allowedTCPPorts = [ 
     22    # SSH (Authentification sécurisée par clé configurée)
