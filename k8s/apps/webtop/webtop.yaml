@@ -33,6 +33,17 @@ spec:
     spec:
       securityContext:
         fsGroup: 1000
+      initContainers:
+        - name: fix-run-permissions
+          image: busybox:latest
+          command: ['sh', '-c', 'chown -R 1000:1000 /var/run /tmp']
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: var-run
+              mountPath: /var/run
+            - name: tmp
+              mountPath: /tmp
       containers:
         - name: webtop
           image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
@@ -69,6 +80,10 @@ spec:
         - name: webtop-config
           persistentVolumeClaim:
             claimName: webtop-config-pvc
+        - name: tmp
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
