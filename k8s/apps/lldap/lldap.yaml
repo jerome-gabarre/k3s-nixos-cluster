@@ -32,6 +32,7 @@ spec:
       enableServiceLinks: false # Stoppe l'injection des variables LLDAP_SVC_*
       securityContext:
         fsGroup: 1000
+        runAsUser: 1000
       containers:
         - name: lldap
           image: lldap/lldap:latest
