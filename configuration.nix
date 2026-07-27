@@ -233,6 +233,8 @@ in
       # Désactivation du Traefik par défaut pour gestion GitOps via Flux
       "--disable=traefik"
       "--disable=local-storage"
+      "--kubelet-arg=container-log-max-size=10Mi"
+      "--kubelet-arg=container-log-max-files=3"
     ];
   };
 

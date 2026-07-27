@@ -22,7 +22,8 @@
     # Injection des binaires nécessaires dans le $PATH du service
     path = [ pkgs.nettools ]; 
     script = ''
-      MAC=$(cat /sys/class/net/enp3s0/address 2>/dev/null || echo "unknown")
+      DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}')
+      MAC=$(cat /sys/class/net/$DEFAULT_IFACE/address 2>/dev/null | tr -d ':' || echo "unknown")
       
       if [ "$MAC" = "14:b3:1f:14:e0:99" ]; then
         TARGET_HOSTNAME="worker-amd64-01"
@@ -56,6 +57,12 @@
 
   # TOLÉRANCE AU ROUTAGE ASYMÉTRIQUE DU CNI (FLANNEL)
   networking.firewall.checkReversePath = "loose";
+
+  services.journald.extraConfig = ''
+    SystemMaxUse=50M
+    RuntimeMaxUse=50M
+    MaxRetentionSec=1d
+  '';
 
   # Confiance absolue sur les interfaces réseau internes du cluster k3s
   networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
@@ -128,6 +135,8 @@
       "--kubelet-arg=eviction-soft=memory.available<10%,nodefs.available<15%"
       "--kubelet-arg=eviction-soft-grace-period=memory.available=2m,nodefs.available=2m"
       "--kubelet-arg=eviction-max-pod-grace-period=120"
+      "--kubelet-arg=container-log-max-size=10Mi"
+      "--kubelet-arg=container-log-max-files=3"
     ];
   };
 

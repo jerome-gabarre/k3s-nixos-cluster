@@ -39,6 +39,21 @@ spec:
           # --- DURCISSEMENT CONTENEUR ---
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsUser: 1000
+            runAsGroup: 1000
+          volumeMounts:
+            - name: webtop-config
+               mountPath: /config
+            - name: tmp
+              mountPath: /tmp
+            - name: var-run
+              mountPath: /var/run
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: var-run
+          emptyDir: {}
           env:
             - name: PUID
               value: "1000"
