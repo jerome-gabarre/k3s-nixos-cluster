@@ -176,7 +176,17 @@
         disk_name=$(basename "$disk")
         
         # Génération d'un suffixe unique basé sur le serial (XFS limite les labels à 12 caractères)
-        id=$(udevadm info --query=property --name="$disk" | grep -E '^ID_SERIAL_SHORT=' | cut -d= -f2 | tail -c 8 || echo "$RANDOM")
+        # 1. Priorité au WWN (idéal pour SAN/Virtual-Disks)
+        raw_id=$(lsblk -d -n -o WWN "$disk" | tr -d ' ')
+        
+        # 2. Fallback sur le SERIAL (idéal pour disques physiques)
+        [ -z "$raw_id" ] && raw_id=$(lsblk -d -n -o SERIAL "$disk" | tr -d ' ')
+        
+        # 3. Fallback déterministe absolu (hash du path) au lieu de $RANDOM
+        [ -z "$raw_id" ] && raw_id=$(echo -n "$disk" | sha1sum | cut -c1-8)
+        
+        # Nettoyage et troncature à 8 caractères pour le label XFS (max 12 chars)
+        id=$(echo "$raw_id" | sed 's/[^a-zA-Z0-9]//g' | tail -c 8)
         expected_label="LH_$id"
         
         # Vérifier si une partition avec notre prefixe LH_ existe sur ce disque

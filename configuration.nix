@@ -228,6 +228,7 @@ in
       "--flannel-backend=wireguard-native"
       # Désactivation du Traefik par défaut pour gestion GitOps via Flux
       "--disable=traefik"
+      "--disable=local-storage"
     ];
   };
 
