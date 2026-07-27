@@ -141,6 +141,23 @@
   # =====================================================================
   # 1. PRÉPARATION DU STOCKAGE ET DES SECRETS (AVANT K3S)
   # =====================================================================
+
+  # utiliser la commande suivante sur le noeud en SSH pour formater les disques au préalable puis faire un reboot pour détecter les disques.
+  # for disk in $(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" && $1 !~ /zram|loop/ {print $1}'); do
+  # echo "⚠️ Formatage destructif du disque : $disk"
+  # wipefs -a "$disk"
+  # parted -s "$disk" mklabel gpt mkpart primary xfs 0% 100%
+  # udevadm settle
+  # Trouver le nom de la nouvelle partition (gère les cas sda1 vs nvme0n1p1)
+  # if [[ "$disk" == *nvme* || "$disk" == *mmcblk* ]]; then
+  #   part="${disk}p1"
+  # else
+  #   part="${disk}1"
+  # fi
+  # mkfs.xfs -f -L LONGHORN_DATA "$part"
+  # echo "✅ $part formaté avec succès."
+  # done
+
   systemd.services.prepare-k3s-disk = {
     description = "Initialisation, montage du disque et déchiffrement SOPS";
     
@@ -148,7 +165,7 @@
     requiredBy = [ "k3s.service" ];
     
     path = with pkgs;
-      [ util-linux parted e2fsprogs xfsprogs systemd gawk sops ssh-to-age openssh ];
+      [ util-linux parted e2fsprogs xfsprogs systemd gawk sops ssh-to-age openssh jq ];
       
     serviceConfig = {
       Type = "oneshot";
@@ -160,65 +177,38 @@
       MOUNT_POINT="/var/lib/rancher/k3s"
       PRIMARY_DISK_MOUNTED=false
       JSON_DISKS=""
+      TARGET_LABEL="LONGHORN_DATA"
       
-      echo "🛡️ DÉMARRAGE DU PROVISIONNEMENT ZERO-TOUCH DES DISQUES"
+      echo "🛡️ DÉMARRAGE DU PROVISIONNEMENT DÉTERMINISTE DES DISQUES"
       udevadm settle
       
-      # Récupérer tous les disques physiques (exclut la RAM, les loop devices)
-      disks=$(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" && $1 !~ /zram|loop/ {print $1}')
+      # Recherche stricte des partitions portant le label exact
+      target_parts=$(blkid -L "$TARGET_LABEL" || true)
       
-      if [ -z "$disks" ]; then
-        echo "❌ Aucun disque physique trouvé. Arrêt."
+      if [ -z "$target_parts" ]; then
+        echo "❌ Aucun disque avec le label $TARGET_LABEL trouvé."
+        echo "Action requise : Formatez manuellement le disque cible via 'mkfs.xfs -L $TARGET_LABEL /dev/sdX1'"
         exit 1
       fi
       
-      for disk in $disks; do
+      for part in $target_parts; do
+        disk=$(lsblk -no PKNAME "$part" | tr -d ' ' || echo "$part")
         disk_name=$(basename "$disk")
         
-        # Génération d'un suffixe unique
-        raw_id=$(lsblk -d -n -o WWN "$disk" | tr -d ' ')
-        [ -z "$raw_id" ] && raw_id=$(lsblk -d -n -o SERIAL "$disk" | tr -d ' ')
-        [ -z "$raw_id" ] && raw_id=$(echo -n "$disk" | sha1sum | cut -c1-8)
+        echo "✅ Disque autorisé détecté : $part"
         
-        id=$(echo "$raw_id" | sed 's/[^a-zA-Z0-9]//g' | tail -c 8)
-        expected_label="LH_$id"
-        
-        k3s_part=$(lsblk -r -n -o NAME,LABEL "$disk" | awk '/LH_/ {print "/dev/"$1}' | head -n 1)
-        FS_DETECTED=$(lsblk -f -n -o FSTYPE "$disk" | tr -d ' ' | grep -v '^$')
-        
-        if [ -n "$k3s_part" ]; then
-          echo "✅ Disque $disk déjà provisionné pour K3s/Longhorn : $k3s_part"
-        elif [ -n "$FS_DETECTED" ]; then
-          echo "⚠️ Le disque $disk contient déjà des données ($FS_DETECTED). Formatage ignoré par sécurité."
-          continue
-        else
-          echo "⚠️ Nouveau disque vierge détecté ($disk). Formatage destructif en cours..."
-          wipefs -a "$disk"
-          parted -s "$disk" mklabel gpt mkpart primary xfs 0% 100%
-          udevadm settle
-          
-          if [[ "$disk" == *nvme* || "$disk" == *mmcblk* ]]; then
-            k3s_part="''${disk}p1"
-          else
-            k3s_part="''${disk}1"
-          fi
-          
-          mkfs.xfs -f -L "$expected_label" "$k3s_part"
-          echo "✅ Disque $disk formaté."
-        fi
-        
-        ROTA=$(lsblk -d -n -o ROTA "$disk" | tr -d ' ')
+        ROTA=$(lsblk -d -n -o ROTA "/dev/$disk_name" | tr -d ' ')
         if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
         
         if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
           mkdir -p $MOUNT_POINT
-          if ! mountpoint -q $MOUNT_POINT; then mount "$k3s_part" $MOUNT_POINT; fi
+          if ! mountpoint -q $MOUNT_POINT; then mount "$part" $MOUNT_POINT; fi
           JSON_DISKS+="{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]},"
           PRIMARY_DISK_MOUNTED=true
         else
           lh_mount="/var/lib/longhorn/disks/$disk_name"
           mkdir -p "$lh_mount"
-          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$k3s_part" "$lh_mount"; fi
+          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$part" "$lh_mount"; fi
           JSON_DISKS+="{\"path\":\"$lh_mount\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\"]},"
         fi
       done
