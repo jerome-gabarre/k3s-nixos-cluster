@@ -249,6 +249,7 @@ in
     util-linux
     nfs-utils
     openiscsi
+    nftables
 
   ];
 
