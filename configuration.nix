@@ -35,6 +35,11 @@ in
   # --- ARCHITECTURE CIBLE DU MASTER ---
   nixpkgs.hostPlatform = "aarch64-linux";
 
+  services.journald.extraConfig = ''
+    SystemMaxUse=100M
+    MaxRetentionSec=3d
+  '';
+
   # --- ACTIVATION DE L'ÉMULATION X86_64 (CRITIQUE) ---
   # Permet au Raspberry Pi (ARM) d'assembler l'image pour le PC (Intel/AMD)
   # boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
@@ -337,7 +342,7 @@ in
     gc = {
       automatic = true;
       dates = "daily"; # Se lance tous les jours
-      options = "--delete-older-than 3d"; # SUPPRIME les versions de plus de 3 jours
+      options = "--delete-older-than 1d"; # SUPPRIME les versions de plus de 1 jours
     };
     optimise = {
       automatic = true;
