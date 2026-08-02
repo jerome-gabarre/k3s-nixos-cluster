@@ -32,6 +32,11 @@ spec:
         app: webtop
     spec:
       securityContext:
+        fsGroup: 1000
+      containers:
+        - name: webtop
+          image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
+          securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop:
