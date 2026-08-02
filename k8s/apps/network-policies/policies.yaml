@@ -84,3 +84,20 @@ spec:
       port: 80
     - protocol: TCP
       port: 443
+---
+# 6. Autoriser Authelia à vérifier l'heure (NTP) pour la sécurité TOTP
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-authelia-ntp
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: authelia
+  policyTypes:
+  - Egress
+  egress:
+  - ports:
+    - protocol: UDP
+      port: 123
