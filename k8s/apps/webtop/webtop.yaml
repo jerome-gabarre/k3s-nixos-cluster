@@ -38,9 +38,6 @@ spec:
           image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
           securityContext:
             allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
           env:
             - name: PUID
               value: "1000"
