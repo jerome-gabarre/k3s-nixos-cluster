@@ -10,6 +10,7 @@ pkgs.mkShell {
     ssh-to-age
     sops
     nmap
+    k9s
   ];
 
   shellHook = ''
