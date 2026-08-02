@@ -31,13 +31,12 @@ spec:
       labels:
         app: webtop
     spec:
+      spec:
       securityContext:
         fsGroup: 1000
       containers:
         - name: webtop
           image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
-          securityContext:
-            allowPrivilegeEscalation: false
           env:
             - name: PUID
               value: "1000"
@@ -58,10 +57,15 @@ spec:
           volumeMounts:
             - name: webtop-config
               mountPath: /config
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: webtop-config
           persistentVolumeClaim:
             claimName: webtop-config-pvc
+        - name: dshm
+          emptyDir:
+            medium: Memory
 ---
 apiVersion: v1
 kind: Service
