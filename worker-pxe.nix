@@ -164,11 +164,12 @@
   # 2. Création des répertoires de liaison AVANT les bind mounts
   systemd.services.init-k3s-dirs = {
     description = "Initialisation des dossiers sources pour K3s";
-    # On garantit que ce service s'exécute avant que systemd ne tente de faire les bind mounts
+    wantedBy = [ "multi-user.target" ];
     before = [ 
       "var-lib-longhorn.mount" 
       "var-lib-kubelet.mount" 
-      "etc-rancher-node.mount" 
+      "etc-rancher-node.mount"
+      "k3s-agent.service"
     ];
     requires = [ "var-lib-rancher-k3s.mount" ];
     after = [ "var-lib-rancher-k3s.mount" ];
@@ -192,7 +193,8 @@
 
   fileSystems."/var/lib/kubelet" = {
     device = "/var/lib/rancher/k3s/kubelet";
-    options = [ "bind" "shared" ];
+    # L'option 'shared' a été retirée car non standard pour fstab, k3s le gère de lui-même
+    options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
 
@@ -205,8 +207,10 @@
   # 4. Configuration finale (SSH, Longhorn JSON et SOPS)
   systemd.services.prepare-k3s-state = {
     description = "Génération SSH, JSON Longhorn et décryptage SOPS";
-    before = [ "k3s.service" "sshd.service" ];
-    requiredBy = [ "k3s.service" ];
+    wantedBy = [ "multi-user.target" ];
+    # CORRECTION : Liaison stricte avec k3s-agent.service
+    before = [ "k3s-agent.service" "sshd.service" ];
+    requiredBy = [ "k3s-agent.service" ];
     requires = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
     after = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
     path = with pkgs; [ util-linux sops ssh-to-age openssh jq ];
@@ -220,13 +224,10 @@
 
       echo "🛡️ PROVISIONNEMENT DE L'ÉTAT DU NŒUD"
 
-      # Génération de la clé SSH persistante
       if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
         ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
       fi
 
-      # Génération du default-disks.json pour Longhorn
-      # Évaluation ciblée du disque hébergeant LONGHORN_DAT
       DISK_NAME=$(lsblk -no PKNAME /dev/disk/by-label/LONGHORN_DAT | tr -d ' ' || true)
       if [ -z "$DISK_NAME" ]; then
         DISK_NAME=$(basename $(readlink -f /dev/disk/by-label/LONGHORN_DAT))
@@ -237,12 +238,29 @@
       
       echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
 
-      # Déchiffrement du token K3s via SOPS
       PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
       chmod 600 $MOUNT_POINT/k3s_token
     '';
+  };
+
+  # 5. Sécurité : Forcer K3s-agent à attendre la fin absolue des montages
+  systemd.services.k3s-agent = {
+    after = [ 
+      "var-lib-rancher-k3s.mount" 
+      "var-lib-longhorn.mount" 
+      "var-lib-kubelet.mount" 
+      "etc-rancher-node.mount" 
+      "init-k3s-dirs.service"
+      "prepare-k3s-state.service"
+    ];
+    requires = [ 
+      "var-lib-rancher-k3s.mount" 
+      "var-lib-longhorn.mount" 
+      "var-lib-kubelet.mount" 
+      "etc-rancher-node.mount" 
+    ];
   };
 
   # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
