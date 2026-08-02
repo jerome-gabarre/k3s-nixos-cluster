@@ -32,26 +32,10 @@ spec:
         app: webtop
     spec:
       securityContext:
-        fsGroup: 1000
-      initContainers:
-        - name: fix-run-permissions
-          image: busybox:latest
-          command: ['sh', '-c', 'chown 1000:1000 /var/run /tmp']
-          securityContext:
-            runAsUser: 0
-          volumeMounts:
-            - name: var-run
-              mountPath: /var/run
-            - name: tmp
-              mountPath: /tmp
-      containers:
-        - name: webtop
-          image: lscr.io/linuxserver/webtop:alpine-icewm-version-728f016d
-          securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
-            runAsUser: 1000
-            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
           env:
             - name: PUID
               value: "1000"
