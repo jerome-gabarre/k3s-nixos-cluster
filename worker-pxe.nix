@@ -151,102 +151,94 @@
   };
 
   # =====================================================================
-  # ⚠️ ORCHESTRATION DU STOCKAGE HYBRIDE (STATELESS OS -> STATEFUL DATA)
-  # =====================================================================
-  # Ce Worker bootant en réseau (PXE), sa RAM et son OS sont réinitialisés à chaque démarrage.
-  # Ce script garantit la survie des bases de données (K3s/Longhorn) et des secrets (SOPS)
-  # en forçant l'écriture sur le disque dur physique de la machine.
-  # =====================================================================
-  # =====================================================================
-  # 1. PRÉPARATION DU STOCKAGE ET DES SECRETS (AVANT K3S)
+  # ⚠️ ORCHESTRATION DU STOCKAGE HYBRIDE (DÉCLARATIF NIXOS)
   # =====================================================================
 
-  # utiliser la commande suivante sur le noeud en SSH pour formater les disques au préalable puis faire un reboot pour détecter les disques.
-  # for disk in $(lsblk -dpno NAME,TYPE,RM | awk '$2=="disk" && $3=="0" && $1 !~ /zram|loop/ {print $1}'); do
-  # echo "⚠️ Formatage destructif du disque : $disk"
-  # wipefs -a "$disk"
-  # parted -s "$disk" mklabel gpt mkpart primary xfs 0% 100%
-  # udevadm settle
-  # Trouver le nom de la nouvelle partition (gère les cas sda1 vs nvme0n1p1)
-  # if [[ "$disk" == *nvme* || "$disk" == *mmcblk* ]]; then
-  #   part="${disk}p1"
-  # else
-  #   part="${disk}1"
-  # fi
-  # mkfs.xfs -f -L LONGHORN_DATA "$part"
-  # echo "✅ $part formaté avec succès."
-  # done
+  # 1. Montage natif du disque d'état (Stateful)
+  fileSystems."/var/lib/rancher/k3s" = {
+    device = "/dev/disk/by-label/LONGHORN_DAT";
+    fsType = "xfs";
+    options = [ "defaults" "pquota" ]; # pquota est fortement recommandé par Longhorn
+  };
 
-  systemd.services.prepare-k3s-disk = {
-    description = "Initialisation, montage du disque et déchiffrement SOPS";
-    
+  # 2. Création des répertoires de liaison AVANT les bind mounts
+  systemd.services.init-k3s-dirs = {
+    description = "Initialisation des dossiers sources pour K3s";
+    # On garantit que ce service s'exécute avant que systemd ne tente de faire les bind mounts
+    before = [ 
+      "var-lib-longhorn.mount" 
+      "var-lib-kubelet.mount" 
+      "etc-rancher-node.mount" 
+    ];
+    requires = [ "var-lib-rancher-k3s.mount" ];
+    after = [ "var-lib-rancher-k3s.mount" ];
+    serviceConfig = { 
+      Type = "oneshot"; 
+      RemainAfterExit = true; 
+    };
+    script = ''
+      mkdir -p /var/lib/rancher/k3s/longhorn_default
+      mkdir -p /var/lib/rancher/k3s/kubelet
+      mkdir -p /var/lib/rancher/k3s/etc_rancher_node
+    '';
+  };
+
+  # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
+  fileSystems."/var/lib/longhorn" = {
+    device = "/var/lib/rancher/k3s/longhorn_default";
+    options = [ "bind" ];
+    depends = [ "/var/lib/rancher/k3s" ];
+  };
+
+  fileSystems."/var/lib/kubelet" = {
+    device = "/var/lib/rancher/k3s/kubelet";
+    options = [ "bind" "shared" ];
+    depends = [ "/var/lib/rancher/k3s" ];
+  };
+
+  fileSystems."/etc/rancher/node" = {
+    device = "/var/lib/rancher/k3s/etc_rancher_node";
+    options = [ "bind" ];
+    depends = [ "/var/lib/rancher/k3s" ];
+  };
+
+  # 4. Configuration finale (SSH, Longhorn JSON et SOPS)
+  systemd.services.prepare-k3s-state = {
+    description = "Génération SSH, JSON Longhorn et décryptage SOPS";
     before = [ "k3s.service" "sshd.service" ];
     requiredBy = [ "k3s.service" ];
-    
-    path = with pkgs;
-      [ util-linux parted e2fsprogs xfsprogs systemd gawk sops ssh-to-age openssh jq ];
-      
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
+    requires = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
+    after = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
+    path = with pkgs; [ util-linux sops ssh-to-age openssh jq ];
+    serviceConfig = { 
+      Type = "oneshot"; 
+      RemainAfterExit = true; 
     };
-    
     script = ''
       set -e
       MOUNT_POINT="/var/lib/rancher/k3s"
-      PRIMARY_DISK_MOUNTED=false
-      JSON_DISKS=""
-      TARGET_LABEL="LONGHORN_DAT"
-      
-      echo "🛡️ DÉMARRAGE DU PROVISIONNEMENT DÉTERMINISTE DES DISQUES"
-      udevadm settle
-      
-      # Recherche stricte des partitions portant le label exact
-      target_parts=$(blkid -L "$TARGET_LABEL" || true)
-      
-      if [ -z "$target_parts" ]; then
-        echo "❌ Aucun disque avec le label $TARGET_LABEL trouvé."
-        echo "Action requise : Formatez manuellement le disque cible via 'mkfs.xfs -L $TARGET_LABEL /dev/sdX1'"
-        exit 1
+
+      echo "🛡️ PROVISIONNEMENT DE L'ÉTAT DU NŒUD"
+
+      # Génération de la clé SSH persistante
+      if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
+        ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
+      fi
+
+      # Génération du default-disks.json pour Longhorn
+      # Évaluation ciblée du disque hébergeant LONGHORN_DAT
+      DISK_NAME=$(lsblk -no PKNAME /dev/disk/by-label/LONGHORN_DAT | tr -d ' ' || true)
+      if [ -z "$DISK_NAME" ]; then
+        DISK_NAME=$(basename $(readlink -f /dev/disk/by-label/LONGHORN_DAT))
       fi
       
-      for part in $target_parts; do
-        disk=$(lsblk -no PKNAME "$part" | tr -d ' ' || echo "$part")
-        disk_name=$(basename "$disk")
-        
-        echo "✅ Disque autorisé détecté : $part"
-        
-        ROTA=$(lsblk -d -n -o ROTA "/dev/$disk_name" | tr -d ' ')
-        if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
-        
-        if [ "$PRIMARY_DISK_MOUNTED" = false ]; then
-          mkdir -p $MOUNT_POINT
-          if ! mountpoint -q $MOUNT_POINT; then mount "$part" $MOUNT_POINT; fi
-          JSON_DISKS+="{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]},"
-          PRIMARY_DISK_MOUNTED=true
-        else
-          lh_mount="/var/lib/longhorn/disks/$disk_name"
-          mkdir -p "$lh_mount"
-          if ! grep -qs "$lh_mount" /proc/mounts; then mount "$part" "$lh_mount"; fi
-          JSON_DISKS+="{\"path\":\"$lh_mount\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\"]},"
-        fi
-      done
-
-      mkdir -p $MOUNT_POINT/etc_rancher_node /etc/rancher/node
-      if ! mountpoint -q /etc/rancher/node; then mount --bind $MOUNT_POINT/etc_rancher_node /etc/rancher/node; fi
-
-      mkdir -p $MOUNT_POINT/longhorn_default /var/lib/longhorn
-      if ! mountpoint -q /var/lib/longhorn; then mount --bind $MOUNT_POINT/longhorn_default /var/lib/longhorn; fi
-
-      mkdir -p $MOUNT_POINT/kubelet /var/lib/kubelet
-      if ! mountpoint -q /var/lib/kubelet; then mount --bind $MOUNT_POINT/kubelet /var/lib/kubelet; fi
-      mount --make-shared /var/lib/kubelet
-
-      echo "[''${JSON_DISKS%,}]" > /var/lib/longhorn/default-disks.json
-
-      if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q; fi
-      PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
+      ROTA=$(lsblk -d -n -o ROTA "/dev/$DISK_NAME" | tr -d ' ' || echo "0")
+      if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
       
+      echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
+
+      # Déchiffrement du token K3s via SOPS
+      PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
       chmod 600 $MOUNT_POINT/k3s_token
