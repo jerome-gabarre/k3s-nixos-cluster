@@ -27,23 +27,47 @@ spec:
         matchLabels:
           kubernetes.io/metadata.name: traefik-system
 ---
-# 3. Autoriser les pods du namespace default à communiquer entre eux (ex: Authelia -> LLDAP)
+# 3. Autoriser Authelia (Egress) à requêter LLDAP sur le port 3890
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-intra-namespace
+  name: allow-egress-authelia-to-lldap
   namespace: default
 spec:
-  podSelector: {}
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: authelia
   policyTypes:
-  - Ingress
   - Egress
-  ingress:
-  - from:
-    - podSelector: {}
   egress:
   - to:
-    - podSelector: {}
+    - podSelector:
+        matchLabels:
+          app: lldap
+    ports:
+    - protocol: TCP
+      port: 3890
+---
+# 3bis. Autoriser LLDAP (Ingress) à recevoir les requêtes d'Authelia
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-lldap-from-authelia
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: lldap
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: authelia
+    ports:
+    - protocol: TCP
+      port: 3890
 ---
 # 4. Autoriser la résolution DNS vers CoreDNS
 apiVersion: networking.k8s.io/v1

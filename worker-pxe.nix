@@ -19,19 +19,24 @@
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    # Injection des binaires nécessaires dans le $PATH du service
     path = with pkgs; [ nettools iproute2 gawk coreutils ]; 
     script = ''
-      # Attente de la table de routage DHCP
-      sleep 2
-      DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}')
+      echo "Attente de la connectivité réseau et de la route par défaut..."
       
-      # Fallback si la route est lente à monter
+      # Attente active (jusqu'à 30 secondes) de la route par défaut au lieu d'un sleep arbitraire
+      for i in {1..30}; do
+        DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}' | head -n 1)
+        [ -n "$DEFAULT_IFACE" ] && break
+        sleep 1
+      done
+      
+      # Fallback extrême si le routage est manuel ou anormalement lent
       if [ -z "$DEFAULT_IFACE" ]; then
+        echo "AVERTISSEMENT: Aucune route par défaut. Fallback sur la première interface physique."
         DEFAULT_IFACE=$(ls /sys/class/net | grep -E '^en|^eth' | head -n 1)
       fi
 
-      # Extraction propre
+      # Extraction de la MAC
       MAC_RAW=$(cat "/sys/class/net/$DEFAULT_IFACE/address" 2>/dev/null || echo "unknown")
       
       if [ "$MAC_RAW" = "14:b3:1f:14:e0:99" ]; then
@@ -41,6 +46,7 @@
         TARGET_HOSTNAME="worker-$MAC_CLEAN"
       fi
 
+      echo "Assignation du hostname: $TARGET_HOSTNAME"
       hostname "$TARGET_HOSTNAME"
     '';
   };
