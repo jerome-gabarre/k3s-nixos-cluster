@@ -46,14 +46,16 @@
   services.adguardhome = {
     enable = true;
     openFirewall = true;
-    # La définition de "settings" écrase la configuration générée par l'UI
+    
+    # Options NixOS natives (remplacent le sous-bloc settings.http)
+    host = "0.0.0.0";
+    port = 80;
+    
+    mutableSettings = false; # Verrouillage GitOps strict
+    
     settings = {
-      http = {
-        # Port de l'interface d'administration
-        address = "0.0.0.0:80";
-      };
+      schema_version = 29;
       dns = {
-        # Port d'écoute DNS et serveurs en amont (Upstream)
         bind_hosts = [ "0.0.0.0" ];
         port = 53;
         bootstrap_dns = [ "1.1.1.1" "9.9.9.9" ];
@@ -62,15 +64,6 @@
           "https://dns.quad9.net/dns-query"
         ];
       };
-      # Listes de filtres (blocklists)
-      filters = [
-        {
-          enabled = true;
-          url = "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt";
-          name = "AdGuard DNS filter";
-          id = 1;
-        }
-      ];
     };
   };
 
