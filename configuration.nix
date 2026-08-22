@@ -56,6 +56,7 @@ in
     "cgroup_enable=cpuset"
     "cgroup_memory=1"
     "cgroup_enable=memory"
+    "systemd.unified_cgroup_hierarchy=1" # Active Cgroup v2 pour le contrôle strict des I/O par kubelet
   ];
 
   # --- CONFIGURATIONS MATÉRIELLES SUPPLÉMENTAIRES ---
@@ -124,7 +125,6 @@ in
   users.users.nixos = {
     isNormalUser = true;
     extraGroups = [ "wheel" ]; # Permet d'utiliser sudo
-    initialPassword = "CHANGE_ME_MOT_DE_PASSE";
     # Clé SSH :
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
@@ -137,6 +137,9 @@ in
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
     ];
   };
+
+  # Autoriser l'élévation de privilèges sans mot de passe pour le groupe wheel (puisque l'authentification se fait par clé SSH)
+  security.sudo.wheelNeedsPassword = false;
 
 
   # Activation du serveur X11 (nécessaire pour l'interface graphique)
@@ -204,8 +207,8 @@ in
 
   # --- OPTIMISATIONS DES PERFORMANCES (NIXOS) ---
   
-  # Forcer le processeur en mode performance (utile pour l'overclocking)
-  powerManagement.cpuFreqGovernor = "schedutil";
+  # Forcer le processeur en mode performance (utile pour l'overclocking et etcd)
+  powerManagement.cpuFreqGovernor = "performance";
   
   # Activation du ZRAM (Ultra Critique)
   zramSwap.enable = true;
