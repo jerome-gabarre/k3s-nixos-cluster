@@ -24,19 +24,19 @@ pkgs.mkShell {
     echo "  git-sync     -> Ajoute, commit et pousse le code pour FluxCD (k3s)"
     echo "======================================================"
 
-    deploy-os() {
+   deploy-os() {
       echo "📂 1 - Synchronisation intelligente vers le Pi (via rsync)..."
-      rsync -avz --exclude='.git' --exclude='.github' --exclude='secrets.yaml' ./ root@192.168.10.103:/etc/nixos/ && \
-
+      rsync -avz --exclude='.git' --exclude='.github' ./ root@192.168.10.103:/etc/nixos/ && \
+      
       echo "🚀 2 - Compilation de l'infrastructure sur Windows..." && \
       nix-build '<nixpkgs/nixos>' -A system -I nixos-config=./configuration.nix && \
-
+      
       echo "📦 3 - Envoi sécurisé au Raspberry Pi..." && \
       nix-copy-closure --to root@192.168.10.103 ./result && \
-
-      echo "🔄 4 - Activation du nouveau système..." && \
-      ssh root@192.168.10.103 "$(readlink result)/bin/switch-to-configuration switch" && \
-
+      
+      echo "🔄 4 - Activation du système et réinjection des règles réseau CNI..." && \
+      ssh root@192.168.10.103 "$(readlink result)/bin/switch-to-configuration switch && systemctl restart k3s.service" && \
+      
       echo "✅ Couche Système déployée avec succès !" || \
       echo "❌ Échec lors du déploiement OS."
     }

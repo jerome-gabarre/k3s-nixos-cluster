@@ -11,7 +11,7 @@
 
   systemd.services.set-deterministic-hostname = {
     description = "Set deterministic hostname based on MAC address";
-    before = [ "k3s.service" "k3s-agent.service" ];
+    before = [ "k3s.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
@@ -175,7 +175,7 @@
       "var-lib-longhorn.mount" 
       "var-lib-kubelet.mount" 
       "etc-rancher-node.mount"
-      "k3s-agent.service"
+      "k3s.service"
     ];
     requires = [ "var-lib-rancher-k3s.mount" ];
     after = [ "var-lib-rancher-k3s.mount" ];
@@ -215,8 +215,8 @@
     description = "Génération SSH, JSON Longhorn et décryptage SOPS";
     wantedBy = [ "multi-user.target" ];
     # CORRECTION : Liaison stricte avec k3s-agent.service
-    before = [ "k3s-agent.service" "sshd.service" ];
-    requiredBy = [ "k3s-agent.service" ];
+    before = [ "k3s.service" "sshd.service" ];
+    requiredBy = [ "k3s.service" ];
     requires = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
     after = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
     path = with pkgs; [ util-linux sops ssh-to-age openssh jq ];
@@ -252,7 +252,7 @@
   };
 
   # 5. Sécurité : Forcer K3s-agent à attendre la fin absolue des montages
-  systemd.services.k3s-agent = {
+  systemd.services.k3s = {
     after = [ 
       "var-lib-rancher-k3s.mount" 
       "var-lib-longhorn.mount" 
