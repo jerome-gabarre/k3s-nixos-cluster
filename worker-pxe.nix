@@ -65,6 +65,9 @@
   # --- CONFIGURATION RÉSEAU ---
   networking.networkmanager.enable = true;
 
+  # Désactivation de l'extinction de l'écran (tty) pour lisibilité des crashs
+  boot.kernelParams = [ "consoleblank=0" ];
+
   # Création déclarative des liens symboliques attendus par Longhorn
   systemd.tmpfiles.rules = [
     "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
@@ -193,6 +196,7 @@
       mkdir -p /var/lib/rancher/k3s/longhorn_default
       mkdir -p /var/lib/rancher/k3s/kubelet
       mkdir -p /var/lib/rancher/k3s/etc_rancher_node
+      mkdir -p /var/lib/rancher/k3s/journal
     '';
   };
 
