@@ -20,8 +20,6 @@ spec:
   upgrade:
     crds: CreateReplace
   values:
-    csi:
-      kubeletRootDir: /var/lib/rancher/k3s/agent/kubelet
     defaultSettings:
       defaultReplicaCount: 1
       priorityClass: "longhorn-critical"

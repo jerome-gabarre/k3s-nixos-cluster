@@ -179,6 +179,7 @@
     wantedBy = [ "local-fs.target" ];
     before = [ 
       "var-lib-longhorn.mount" 
+      "var-lib-kubelet.mount"
       "etc-rancher-node.mount"
       "k3s.service"
     ];
@@ -198,6 +199,12 @@
   # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
   fileSystems."/var/lib/longhorn" = {
     device = "/var/lib/rancher/k3s/longhorn_default";
+    options = [ "bind" ];
+    depends = [ "/var/lib/rancher/k3s" ];
+  };
+
+  fileSystems."/var/lib/kubelet" = {
+    device = "/var/lib/rancher/k3s/kubelet";
     options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
@@ -266,6 +273,7 @@
     requires = [ 
       "var-lib-rancher-k3s.mount" 
       "var-lib-longhorn.mount" 
+      "var-lib-kubelet.mount"
       "etc-rancher-node.mount" 
     ];
   };

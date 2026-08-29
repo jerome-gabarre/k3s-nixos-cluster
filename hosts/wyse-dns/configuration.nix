@@ -30,6 +30,13 @@
   networking.hostName = "wyse-dns";
   networking.networkmanager.enable = true;
 
+  # --- DÉSACTIVATION DE LA VEILLE (CRITIQUE SERVEUR) ---
+  # Empêche systemd-logind de suspendre la machine en cas d'inactivité
+  systemd.targets.sleep.enable = false;
+  systemd.targets.suspend.enable = false;
+  systemd.targets.hibernate.enable = false;
+  systemd.targets.hybrid-sleep.enable = false;
+
   # Sécurité SSH (Accès par clé publique uniquement)
   services.openssh = {
     enable = true;
