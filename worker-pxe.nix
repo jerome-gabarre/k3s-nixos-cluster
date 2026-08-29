@@ -62,6 +62,9 @@
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
   system.stateVersion = "25.11";
 
+  # --- CONFIGURATION RÉSEAU ---
+  networking.networkmanager.enable = true;
+
   # Création déclarative des liens symboliques attendus par Longhorn
   systemd.tmpfiles.rules = [
     "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
@@ -170,10 +173,12 @@
   # 2. Création des répertoires de liaison AVANT les bind mounts
   systemd.services.init-k3s-dirs = {
     description = "Initialisation des dossiers sources pour K3s";
-    wantedBy = [ "multi-user.target" ];
+    unitConfig = {
+      DefaultDependencies = false;
+    };
+    wantedBy = [ "local-fs.target" ];
     before = [ 
       "var-lib-longhorn.mount" 
-      "var-lib-kubelet.mount" 
       "etc-rancher-node.mount"
       "k3s.service"
     ];
@@ -193,13 +198,6 @@
   # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
   fileSystems."/var/lib/longhorn" = {
     device = "/var/lib/rancher/k3s/longhorn_default";
-    options = [ "bind" ];
-    depends = [ "/var/lib/rancher/k3s" ];
-  };
-
-  fileSystems."/var/lib/kubelet" = {
-    device = "/var/lib/rancher/k3s/kubelet";
-    # L'option 'shared' a été retirée car non standard pour fstab, k3s le gère de lui-même
     options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
@@ -248,6 +246,10 @@
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
       sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
       chmod 600 $MOUNT_POINT/k3s_token
+
+      echo "🧹 Nettoyage des sockets CSI résiduels..."
+      rm -f $MOUNT_POINT/agent/kubelet/plugins_registry/*.sock || true
+      rm -rf $MOUNT_POINT/agent/kubelet/plugins/driver.longhorn.io/* || true
     '';
   };
 
@@ -264,7 +266,6 @@
     requires = [ 
       "var-lib-rancher-k3s.mount" 
       "var-lib-longhorn.mount" 
-      "var-lib-kubelet.mount" 
       "etc-rancher-node.mount" 
     ];
   };

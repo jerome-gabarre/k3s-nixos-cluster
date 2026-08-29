@@ -28,8 +28,7 @@
 
   # Réseau
   networking.hostName = "wyse-dns";
-  networking.networkmanager.enable = false;
-  networking.useDHCP = true;
+  networking.networkmanager.enable = true;
 
   # Sécurité SSH (Accès par clé publique uniquement)
   services.openssh = {
