@@ -64,6 +64,11 @@
 
   # --- CONFIGURATION RÉSEAU ---
   networking.networkmanager.enable = true;
+  networking.networkmanager.settings = {
+    main = {
+      hostname-mode = "none";
+    };
+  };
 
   # Désactivation de l'extinction de l'écran (tty) pour lisibilité des crashs
   boot.kernelParams = [ "consoleblank=0" ];
@@ -197,18 +202,18 @@
       mkdir -p /var/lib/rancher/k3s/kubelet
       mkdir -p /var/lib/rancher/k3s/etc_rancher_node
       mkdir -p /var/lib/rancher/k3s/journal
+
+      # Redirection forcée de journald vers le stockage d'état
+      umount /var/log/journal 2>/dev/null || true
+      rm -rf /var/log/journal
+      ln -s /var/lib/rancher/k3s/journal /var/log/journal
+      systemctl restart systemd-journald
     '';
   };
 
   # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
   fileSystems."/var/lib/longhorn" = {
     device = "/var/lib/rancher/k3s/longhorn_default";
-    options = [ "bind" ];
-    depends = [ "/var/lib/rancher/k3s" ];
-  };
-
-  fileSystems."/var/lib/kubelet" = {
-    device = "/var/lib/rancher/k3s/kubelet";
     options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
