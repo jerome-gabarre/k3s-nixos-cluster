@@ -10,7 +10,7 @@
   nixpkgs.hostPlatform = "x86_64-linux";
 
   systemd.services.set-deterministic-hostname = {
-    description = "Set deterministic hostname based on MAC address";
+    description = "Set deterministic hostname based on DMI/SMBIOS";
     before = [ "k3s.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -19,37 +19,34 @@
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = with pkgs; [ nettools iproute2 gawk coreutils ]; 
+    path = with pkgs; [ iproute2 coreutils dmidecode ];
     script = ''
-      echo "Attente de la connectivité réseau et de la route par défaut..."
-      
-      # Attente active (jusqu'à 30 secondes) de la route par défaut au lieu d'un sleep arbitraire
-      for i in {1..30}; do
-        DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}' | head -n 1)
-        [ -n "$DEFAULT_IFACE" ] && break
-        sleep 1
-      done
-      
-      # Fallback extrême si le routage est manuel ou anormalement lent
-      if [ -z "$DEFAULT_IFACE" ]; then
-        echo "AVERTISSEMENT: Aucune route par défaut. Fallback sur la première interface physique."
-        DEFAULT_IFACE=$(ls /sys/class/net | grep -E '^en|^eth' | head -n 1)
+      # Fast-path : vérification immédiate
+      if ! ip -4 route show | grep -q "^default"; then
+        echo "Attente événementielle de la route par défaut..."
+        # Lancement en arrière-plan pour forcer la terminaison via PID et éviter le deadlock netlink
+        (ip -4 monitor route & echo $! > /tmp/ip_mon.pid) | grep -q -m 1 "default"
+        kill $(cat /tmp/ip_mon.pid) 2>/dev/null || true
       fi
 
-      # Extraction de la MAC
-      MAC_RAW=$(cat "/sys/class/net/$DEFAULT_IFACE/address" 2>/dev/null || echo "unknown")
+      DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}' | head -n 1)
+
+      # Extraction dynamique basée sur le SMBIOS (UUID de la carte mère)
+      SYSTEM_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d '-' -f 1)
       
-      if [ "$MAC_RAW" = "14:b3:1f:14:e0:99" ]; then
-        TARGET_HOSTNAME="worker-amd64-01"
+      if [ -n "$SYSTEM_UUID" ]; then
+        TARGET_HOSTNAME="worker-$SYSTEM_UUID"
       else
-        MAC_CLEAN=$(echo "$MAC_RAW" | tr -d ':')
-        TARGET_HOSTNAME="worker-$MAC_CLEAN"
+        TARGET_HOSTNAME="worker-generic-$(head -c 4 /dev/urandom | xxd -p)"
       fi
 
       echo "Assignation du hostname: $TARGET_HOSTNAME"
       hostname "$TARGET_HOSTNAME"
     '';
   };
+
+  # Bloque le démarrage de K3s tant que la route par défaut n'est pas établie
+  systemd.services.NetworkManager-wait-online.enable = true;
 
   # On intègre le fichier chiffré dans le système du Worker
   environment.etc."secrets.yaml".source = ./secrets.yaml;
