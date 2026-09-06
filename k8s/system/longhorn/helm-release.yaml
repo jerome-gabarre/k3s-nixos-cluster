@@ -25,5 +25,3 @@ spec:
       priorityClass: "longhorn-critical"
     persistence:
       defaultClassReplicaCount: 1
-    csi:
-      kubeletRootDir: /var/lib/rancher/k3s/agent/kubelet
