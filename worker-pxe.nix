@@ -19,7 +19,7 @@
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = with pkgs; [ iproute2 coreutils dmidecode ];
+    path = with pkgs; [ iproute2 coreutils dmidecode gawk nettools ];
     script = ''
       # Fast-path : vérification immédiate
       if ! ip -4 route show | grep -q "^default"; then
@@ -218,6 +218,12 @@
   fileSystems."/etc/rancher/node" = {
     device = "/var/lib/rancher/k3s/etc_rancher_node";
     options = [ "bind" ];
+    depends = [ "/var/lib/rancher/k3s" ];
+  };
+
+  fileSystems."/var/lib/kubelet" = {
+    device = "/var/lib/rancher/k3s/kubelet";
+    options = [ "bind" "shared" ]; # "shared" est vital pour la propagation des montages CSI Longhorn
     depends = [ "/var/lib/rancher/k3s" ];
   };
 
