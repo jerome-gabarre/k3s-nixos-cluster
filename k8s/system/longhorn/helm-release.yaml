@@ -22,6 +22,10 @@ spec:
   values:
     csi:
       kubeletRootDir: /var/lib/kubelet
+    longhornManager:
+      env:
+        - name: KUBELET_ROOT_DIR
+          value: /var/lib/kubelet
     defaultSettings:
       defaultReplicaCount: 1
       priorityClass: "longhorn-critical"
