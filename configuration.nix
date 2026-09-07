@@ -169,7 +169,7 @@ in
 
   # --- PARAMÈTRE SYSTÈME OBLIGATOIRE ---
   # Cette ligne est requise pour la gestion des versions d'état de NixOS.
-  system.stateVersion = "25.11";
+  system.stateVersion = "26.05";
 
   # --- SÉCURITÉ : PARE-FEU MASTER ---
   networking.firewall.enable = true;
