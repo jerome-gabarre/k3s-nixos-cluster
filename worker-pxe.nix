@@ -155,6 +155,7 @@
 
   # Sécurisation RAM/Disque via seuils d'éviction Kubelet dynamiques (%)
     extraFlags = toString [
+      "--kubelet-arg=root-dir=/var/lib/kubelet" # <-- ALIGNEMENT STANDARD KUBERNETES
       "--kubelet-arg=eviction-hard=memory.available<5%,nodefs.available<10%,nodefs.inodesFree<5%,imagefs.available<10%"
       "--kubelet-arg=eviction-soft=memory.available<10%,nodefs.available<15%"
       "--kubelet-arg=eviction-soft-grace-period=memory.available=2m,nodefs.available=2m"
