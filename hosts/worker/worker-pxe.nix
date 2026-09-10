@@ -212,18 +212,21 @@
   # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
   fileSystems."/var/lib/longhorn" = {
     device = "/var/lib/rancher/k3s/longhorn_default";
+    fsType = "none";
     options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
 
   fileSystems."/etc/rancher/node" = {
     device = "/var/lib/rancher/k3s/etc_rancher_node";
+    fsType = "none";
     options = [ "bind" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
 
   fileSystems."/var/lib/kubelet" = {
     device = "/var/lib/rancher/k3s/kubelet";
+    fsType = "none";
     options = [ "bind" "shared" ]; # "shared" est vital pour la propagation des montages CSI Longhorn
     depends = [ "/var/lib/rancher/k3s" ];
   };
