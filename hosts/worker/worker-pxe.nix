@@ -1,4 +1,4 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, clusterIps, inputs, ... }:
 
 {
   # Import du module officiel pour image RAM
