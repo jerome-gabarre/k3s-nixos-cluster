@@ -148,7 +148,7 @@
    services.k3s = {
     enable = true;
     # renovate: datasource=github-releases depName=k3s-io/k3s
-    package = pkgs.k3s_1_31;
+    package = pkgs.k3s;
     role = "agent";
     serverAddr = "https://${clusterIps.master}:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";

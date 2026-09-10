@@ -40,10 +40,10 @@
 
   # --- BOOTLOADER ET NOYAU ---
   boot.loader.grub.enable = false;
-  boot.loader.generic-extlinux-compatible.enable = true;
+  # boot.loader.generic-extlinux-compatible.enable = true;
   
   # NOYAU RPI4 (Le seul qui comprend le DSI correctement)
-  boot.kernelPackages = pkgs.linuxPackages_rpi4;
+  # boot.kernelPackages = pkgs.linuxPackages_rpi4;
 
   # Activation des cgroups mémoire
   boot.kernelParams = [
@@ -215,7 +215,7 @@
   services.k3s = {
     enable = true;
     # renovate: datasource=github-releases depName=k3s-io/k3s
-    package = pkgs.k3s_1_31;
+    package = pkgs.k3s;
     role = "server"; # Rôle master
     
     # Déclaration explicite du Taint et autres arguments de démarrage
