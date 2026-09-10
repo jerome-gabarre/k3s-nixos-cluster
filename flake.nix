@@ -63,14 +63,14 @@
           NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new" nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
-            --build-host root@$MASTER_IP --use-remote-sudo
+            --build-host root@$MASTER_IP --sudo
         }
 
         deploy-dns() {
           echo "🚀 Déploiement NixOS (Flake) vers le Wyse ($DNS_IP)..."
           NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new" nixos-rebuild switch \
             --flake .#wyse-dns \
-            --target-host root@$DNS_IP --use-remote-sudo
+            --target-host root@$DNS_IP --sudo
         }
 
         git-sync() {
