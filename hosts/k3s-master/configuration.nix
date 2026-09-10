@@ -13,24 +13,12 @@
 #    -> Modifier les manifestes locaux et pousser via les commandes `cd mon-infrastructure`, `nix-shell` puis `git-sync`.
 # =====================================================================
 
-{ config, pkgs, ... }:
+{ config, pkgs, clusterIps, inputs, ... }:
 
-let
-  nixos-hardware = fetchTarball "https://github.com/NixOS/nixos-hardware/archive/master.tar.gz";
-  
-  # On demande à Nix d'évaluer la configuration de notre worker en x86_64
-  workerImage = import <nixpkgs/nixos> {
-    configuration = ./worker-pxe.nix;
-    system = "x86_64-linux";
-  };
-in
 {
-  # --- INCLUSION DE LA CONFIGURATION MATÉRIELLE OBLIGATOIRE ---
-  imports =
-    [ 
-      ./hardware-configuration.nix
-      "${nixos-hardware}/raspberry-pi/4"
-    ];
+  imports = [ 
+    ./hardware-configuration.nix 
+  ];
 
   # --- ARCHITECTURE CIBLE DU MASTER ---
   nixpkgs.hostPlatform = "aarch64-linux";
@@ -38,6 +26,12 @@ in
   services.journald.extraConfig = ''
     SystemMaxUse=100M
     MaxRetentionSec=3d
+  '';
+
+  # Injection déclarative du config.txt dans la partition de boot
+  system.activationScripts.rpi-config = ''
+    echo "Génération de /boot/firmware/config.txt..."
+    cat ${./config_rpi4.txt} > /boot/firmware/config.txt
   '';
 
   # --- ACTIVATION DE L'ÉMULATION X86_64 (CRITIQUE) ---
@@ -229,8 +223,8 @@ in
       # Empêche la planification des pods normaux sur ce noeud
       "--node-taint node-role.kubernetes.io/control-plane=true:NoSchedule"
       # On force l'IP filaire pour toutes les communications du cluster
-      "--node-ip=192.168.10.103"
-      "--advertise-address=192.168.10.103"
+      "--node-ip=${clusterIps.master}"
+      "--advertise-address=${clusterIps.master}"
       "--node-label svccontroller.k3s.cattle.io/enable=false"
       # Désactivation du LoadBalancer par défaut (Klipper) pour installer MetalLB
       "--disable=servicelb"
@@ -332,7 +326,7 @@ in
     };
   };
 
-  # --- CONFIGURATION DU SERVEUR PXE (PIXIECORE) ---
+  # --- CONFIGURATION DU SERVEUR PXE (PIXIECORE) sur la configuration Flake exportée ---
   services.pixiecore = {
     enable = true;
     openFirewall = true;
@@ -340,11 +334,10 @@ in
     mode = "boot";
     port = 8088;         # On libère le port 80 pour K3s
     statusPort = 8088;
-    # On pointe vers les fichiers générés par l'évaluation du workerImage
-    kernel = "${workerImage.config.system.build.kernel}/bzImage";
-    initrd = "${workerImage.config.system.build.netbootRamdisk}/initrd";
+    kernel = "${inputs.self.nixosConfigurations.worker-pxe.config.system.build.kernel}/bzImage";
+    initrd = "${inputs.self.nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk}/initrd";
     # Les paramètres passés au noyau du worker au démarrage
-    cmdLine = "init=${workerImage.config.system.build.toplevel}/init loglevel=4";
+    cmdLine = "init=${inputs.self.nixosConfigurations.worker-pxe.config.system.build.toplevel}/init loglevel=4";
   };
 
   # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---

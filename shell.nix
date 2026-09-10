@@ -16,55 +16,45 @@ pkgs.mkShell {
 
   shellHook = ''
     echo "======================================================"
-    echo "🛠️  ENVIRONNEMENT DE DÉPLOIEMENT HYBRIDE (K3S / NIXOS)"
-    echo "======================================================"
-    echo "Commandes disponibles :"
-    echo "  deploy-os    -> Compile et pousse la config NixOS vers le Master"
-    echo "  deploy-dns   -> Compile et pousse la config NixOS vers le Wyse 3040"
-    echo "  git-sync     -> Ajoute, commit et pousse le code pour FluxCD (k3s)"
+    echo "🛠️  ENVIRONNEMENT DE DÉPLOIEMENT GITOPS & FLAKES"
     echo "======================================================"
 
-   deploy-os() {
-      echo "📂 1 - Synchronisation intelligente vers le Pi (via rsync)..."
-      rsync -avz --exclude='.git' --exclude='.github' ./ root@192.168.10.103:/etc/nixos/ && \
-      
-      echo "🚀 2 - Compilation de l'infrastructure sur Windows..." && \
-      nix-build '<nixpkgs/nixos>' -A system -I nixos-config=./configuration.nix && \
-      
-      echo "📦 3 - Envoi sécurisé au Raspberry Pi..." && \
-      nix-copy-closure --to root@192.168.10.103 ./result && \
-      
-      echo "🔄 4 - Activation du système et réinjection des règles réseau CNI..." && \
-      ssh root@192.168.10.103 "$(readlink result)/bin/switch-to-configuration switch && systemctl restart k3s.service" && \
-      
-      echo "✅ Couche Système déployée avec succès !" || \
-      echo "❌ Échec lors du déploiement OS."
+    # Extraction dynamique des IPs depuis la source de vérité (flake.nix)
+    export MASTER_IP=$(nix eval --raw .#nixosConfigurations.k3s-master._module.specialArgs.clusterIps.master)
+    export DNS_IP=$(nix eval --raw .#nixosConfigurations.wyse-dns._module.specialArgs.clusterIps.dns)
+
+    deploy-os() {
+      echo "🚀 Déploiement NixOS (Flake) vers le Master ($MASTER_IP)..."
+      # --build-host délègue la compilation ARM64 au Pi directement, 
+      # --target-host applique la config, sans rsync manuel.
+      NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new" nixos-rebuild switch \
+        --flake .#k3s-master \
+        --target-host root@$MASTER_IP \
+        --build-host root@$MASTER_IP --use-remote-sudo
     }
 
     deploy-dns() {
-      echo "📂 1 - Synchronisation des sources vers le Wyse..."
-      rsync -avz ./hosts/wyse-dns/ root@192.168.10.104:/etc/nixos/ && \
-
-      echo "🚀 2 - Compilation locale (x86_64) sur WSL2..." && \
-      nix-build '<nixpkgs/nixos>' -A system -I nixos-config=./hosts/wyse-dns/configuration.nix && \
-
-      echo "📦 3 - Envoi de la closure au Wyse 3040..." && \
-      nix-copy-closure --to root@192.168.10.104 ./result && \
-
-      echo "🔄 4 - Activation du service DNS..." && \
-      ssh root@192.168.10.104 "$(readlink result)/bin/switch-to-configuration switch" && \
-
-      echo "✅ Serveur DNS déployé avec succès !" || \
-      echo "❌ Échec lors du déploiement DNS."
+      echo "🚀 Déploiement NixOS (Flake) vers le Wyse ($DNS_IP)..."
+      NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new" nixos-rebuild switch \
+        --flake .#wyse-dns \
+        --target-host root@$DNS_IP --use-remote-sudo
     }
 
     git-sync() {
       echo "🚀 Poussée des modifications vers GitHub pour FluxCD..."
-      git add . && \
-      git commit -m "Auto-sync via shell.nix" && \
-      git push && \
-      echo "✅ Code envoyé ! FluxCD va appliquer les manifestes k3s." || \
-      echo "❌ Échec de la synchronisation Git."
+      git add . && git commit -m "Auto-sync via shell.nix" && git push
+      echo "✅ Code envoyé !"
+    }
+
+    format-worker() {
+      local ip=$1
+      local dev=$2
+      if [ -z "$ip" ] || [ -z "$dev" ]; then
+        echo "Usage: format-worker <IP> <DEVICE> (ex: format-worker 192.168.10.105 /dev/sda)"
+        return 1
+      fi
+      echo "⚠️ Formatage destructif de $dev sur $ip..."
+      ssh root@$ip "wipefs -a -f $dev && mkfs.xfs -f -L LONGHORN_DAT $dev && echo '✅ Disque formaté et labellisé LONGHORN_DAT'"
     }
   '';
 }

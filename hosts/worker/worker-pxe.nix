@@ -3,7 +3,7 @@
 {
   # Import du module officiel pour image RAM
   imports = [
-    <nixpkgs/nixos/modules/installer/netboot/netboot-minimal.nix>
+    "${inputs.nixpkgs}/nixos/modules/installer/netboot/netboot-minimal.nix"
   ];
 
   # Architecture ciblée : PC Standard
@@ -150,7 +150,7 @@
     # renovate: datasource=github-releases depName=k3s-io/k3s
     package = pkgs.k3s_1_31;
     role = "agent";
-    serverAddr = "https://192.168.10.103:6443";
+    serverAddr = "https://${clusterIps.master}:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
 
   # Sécurisation RAM/Disque via seuils d'éviction Kubelet dynamiques (%)
