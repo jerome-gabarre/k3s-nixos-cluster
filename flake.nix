@@ -47,7 +47,7 @@
     # Environnement de déploiement (Remplace le shell.nix)
     devShells."x86_64-linux".default = pkgs.mkShell {
       buildInputs = with pkgs; [
-        rsync git openssh fluxcd kubectl ssh-to-age sops nmap k9s tree
+        rsync git openssh fluxcd kubectl ssh-to-age sops nmap k9s tree nixos-rebuild
       ];
 
       shellHook = ''
