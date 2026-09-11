@@ -59,21 +59,22 @@
         export DNS_IP="${clusterIps.dns}"
 
         deploy-os() {
+          set -e # 🔒 Arrêt immédiat si une étape échoue ou est annulée
           export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new"
           
           echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
-          nix build --no-link .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
+          nix build -L --no-link .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
                               .#nixosConfigurations.worker-pxe.config.system.build.kernel \
                               .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk
           
-          echo "📦 2/3 - Transfert silencieux des binaires x86_64 vers le cache du Master..."
-          nix copy .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
+          echo "📦 2/3 - Transfert SSH des binaires vers le Master (Peut prendre 5-10 min selon l'I/O de la carte SD)..."
+          nix copy -L .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
                    .#nixosConfigurations.worker-pxe.config.system.build.kernel \
                    .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk \
                    --to ssh://root@$MASTER_IP
                    
           echo "🚀 3/3 - Compilation ARM64 et déploiement du Master NixOS..."
-          nixos-rebuild switch \
+          nixos-rebuild switch -L \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
             --build-host root@$MASTER_IP --sudo
@@ -90,6 +91,13 @@
           echo "🚀 Poussée des modifications vers GitHub pour FluxCD..."
           git add . && git commit -m "Auto-sync via Flake env" && git push
           echo "✅ Code envoyé !"
+        }
+
+        clean-local() {
+          echo "🧹 Nettoyage du Nix store local (WSL)..."
+          nix-collect-garbage -d
+          nix store optimise
+          echo "✅ Espace libéré et dédoublonné sur la machine de déploiement."
         }
 
         format-worker() {
