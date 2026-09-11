@@ -60,19 +60,17 @@
 
         deploy-os() {
           set -e
-          # Sécurisation SSH : KeepAlive toutes les 60s et désactivation du multiplexing WSL
-          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ControlMaster=no"
+          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60"
           
           echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
-          # On stocke les chemins binaires absolus générés dans une variable
-          PXE_PATHS=$(nix build -L --no-link --print-out-paths \
+          PXE_PATHS=$(nix build --no-link --print-out-paths \
                               .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
                               .#nixosConfigurations.worker-pxe.config.system.build.kernel \
                               .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk)
           
-          echo "📦 2/3 - Transfert SSH verbeux des binaires vers le cache du Master..."
-          # Affichage explicite des paquets copiés (-v) et utilisation des caches distants (-s)
-          nix-copy-closure -v -s root@$MASTER_IP $PXE_PATHS
+          echo "📦 2/3 - Transfert des binaires vers le Master..."
+          # L'argument --no-check-sigs force l'acceptation des binaires locaux
+          nix copy --no-check-sigs --to ssh-ng://root@$MASTER_IP $PXE_PATHS
                    
           echo "🚀 3/3 - Compilation ARM64 et déploiement du Master NixOS..."
           nixos-rebuild switch -L \
@@ -90,7 +88,8 @@
 
         git-sync() {
           echo "🚀 Poussée des modifications vers GitHub pour FluxCD..."
-          git add . && git commit -m "Auto-sync via Flake env" && git push
+          # Remplacement par git add -A pour indexer toutes les modifications (dont les suppressions)
+          git add -A && git commit -m "Auto-sync via Flake env" && git push
           echo "✅ Code envoyé !"
         }
 
