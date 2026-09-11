@@ -59,8 +59,21 @@
         export DNS_IP="${clusterIps.dns}"
 
         deploy-os() {
-          echo "🚀 Déploiement NixOS (Flake) vers le Master ($MASTER_IP)..."
-          NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new" nixos-rebuild switch \
+          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new"
+          
+          echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
+          nix build --no-link .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
+                              .#nixosConfigurations.worker-pxe.config.system.build.kernel \
+                              .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk
+          
+          echo "📦 2/3 - Transfert silencieux des binaires x86_64 vers le cache du Master..."
+          nix copy .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
+                   .#nixosConfigurations.worker-pxe.config.system.build.kernel \
+                   .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk \
+                   --to ssh://root@$MASTER_IP
+                   
+          echo "🚀 3/3 - Compilation ARM64 et déploiement du Master NixOS..."
+          nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
             --build-host root@$MASTER_IP --sudo
