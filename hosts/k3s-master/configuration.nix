@@ -200,7 +200,7 @@
   networking.hostName = "k3s-master";
 
   # Déploiement du fichier de secrets chiffré
-  environment.etc."secrets.yaml".source = ./secrets.yaml;
+  environment.etc."secrets.yaml".source = ../../secrets.yaml;
 
   # --- OPTIMISATIONS DES PERFORMANCES (NIXOS) ---
   

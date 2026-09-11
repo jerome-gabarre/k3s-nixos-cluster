@@ -49,7 +49,10 @@
   systemd.services.NetworkManager-wait-online.enable = true;
 
   # On intègre le fichier chiffré dans le système du Worker
-  environment.etc."secrets.yaml".source = ./secrets.yaml;
+  environment.etc."secrets.yaml".source = ../../secrets.yaml;
+
+  # Désactivation de l'import forcé ZFS pour purger l'avertissement d'évaluation
+  boot.zfs.forceImportRoot = false;
 
   # --- CRITIQUE POUR LE MATÉRIEL DE RÉCUPÉRATION ---
   # Charge tous les pilotes propriétaires (Realtek, Intel, Broadcom...)
