@@ -59,19 +59,20 @@
         export DNS_IP="${clusterIps.dns}"
 
         deploy-os() {
-          set -e # 🔒 Arrêt immédiat si une étape échoue ou est annulée
-          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new"
+          set -e
+          # Sécurisation SSH : KeepAlive toutes les 60s et désactivation du multiplexing WSL
+          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=60 -o ControlMaster=no"
           
           echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
-          nix build -L --no-link .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
+          # On stocke les chemins binaires absolus générés dans une variable
+          PXE_PATHS=$(nix build -L --no-link --print-out-paths \
+                              .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
                               .#nixosConfigurations.worker-pxe.config.system.build.kernel \
-                              .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk
+                              .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk)
           
-          echo "📦 2/3 - Transfert SSH des binaires vers le Master (Peut prendre 5-10 min selon l'I/O de la carte SD)..."
-          nix copy -L .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
-                   .#nixosConfigurations.worker-pxe.config.system.build.kernel \
-                   .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk \
-                   --to ssh://root@$MASTER_IP
+          echo "📦 2/3 - Transfert SSH verbeux des binaires vers le cache du Master..."
+          # Affichage explicite des paquets copiés (-v) et utilisation des caches distants (-s)
+          nix-copy-closure -v -s root@$MASTER_IP $PXE_PATHS
                    
           echo "🚀 3/3 - Compilation ARM64 et déploiement du Master NixOS..."
           nixos-rebuild switch -L \
