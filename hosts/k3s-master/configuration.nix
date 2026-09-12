@@ -47,7 +47,7 @@
   documentation.info.enable = false;
 
   # 2. Forçage du noyau Linux LTS standard (Garantit la présence dans le cache binaire)
-  boot.kernelPackages = lib.mkForce pkgs.linuxPackages;
+  boot.kernelPackages = pkgs.lib.mkForce pkgs.linuxPackages;
 
   # --- BOOTLOADER ET NOYAU ---
   boot.loader.grub.enable = false;
@@ -355,14 +355,17 @@
   nix = {
     gc = {
       automatic = true;
-      dates = "daily"; # Se lance tous les jours
-      options = "--delete-older-than 1d"; # SUPPRIME les versions de plus de 1 jours
+      dates = "daily";
+      options = "--delete-older-than 1d";
     };
     optimise = {
       automatic = true;
-      dates = [ "daily" ]; # DÉDOUBLONNE le store tous les jours en arrière-plan
+      dates = [ "daily" ];
     };
-    settings.auto-optimise-store = true; # Dédoublonne aussi à la volée pendant la compilation
+    settings = {
+      auto-optimise-store = true;
+      experimental-features = [ "nix-command" "flakes" ];
+    };
   };
 
 }
