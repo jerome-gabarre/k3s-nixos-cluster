@@ -51,7 +51,7 @@
 
   # 3. Contournement de la limite matérielle ASLR du RPi4 (VA 39-bit)
   boot.kernel.sysctl = {
-    "vm.mmap_rnd_bits" = 32;
+    "vm.mmap_rnd_bits" = 24;
   };
 
   # --- BOOTLOADER ET NOYAU ---
