@@ -60,11 +60,10 @@
 
         deploy-os() (
           set -e
-          # Sécurisation extrême pour VPN : Désactivation du QoS, tolérance de 3 min de coupure (15s x 12), désactivation du TCPKeepAlive
           export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=12 -o IPQoS=none -o TCPKeepAlive=no"
           
           echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
-          PXE_PATHS=$(nix build -L --no-link --print-out-paths \
+          PXE_PATHS=$(nix build --no-link --print-out-paths \
                               .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
                               .#nixosConfigurations.worker-pxe.config.system.build.kernel \
                               .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk)
@@ -72,8 +71,8 @@
           echo "📦 2/3 - Transfert des binaires vers le Master..."
           nix copy --no-check-sigs --to ssh-ng://root@$MASTER_IP $PXE_PATHS
                    
-          echo "🚀 3/3 - Compilation ARM64 et déploiement du Master NixOS..."
-          nixos-rebuild switch -L \
+          echo "🚀 3/3 - Évaluation et déploiement du Master NixOS..."
+          nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
             --build-host root@$MASTER_IP --sudo

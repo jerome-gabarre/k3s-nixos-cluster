@@ -38,6 +38,17 @@
   # Permet au Raspberry Pi (ARM) d'assembler l'image pour le PC (Intel/AMD)
   # boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
 
+  # 🔒 OPTIMISATIONS ARM64 : Prévention des Cache Miss
+  
+  # 1. Désactivation de la documentation locale (Évite la compilation de Pandoc et Haskell/GHC)
+  documentation.nixos.enable = false;
+  documentation.doc.enable = false;
+  documentation.man.enable = false;
+  documentation.info.enable = false;
+
+  # 2. Forçage du noyau Linux LTS standard (Garantit la présence dans le cache binaire)
+  boot.kernelPackages = lib.mkForce pkgs.linuxPackages;
+
   # --- BOOTLOADER ET NOYAU ---
   boot.loader.grub.enable = false;
   # boot.loader.generic-extlinux-compatible.enable = true;
