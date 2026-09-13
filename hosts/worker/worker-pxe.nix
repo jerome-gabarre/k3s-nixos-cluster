@@ -176,7 +176,7 @@
   fileSystems."/var/lib/rancher/k3s" = {
     device = "/dev/disk/by-label/LONGHORN_DAT";
     fsType = "xfs";
-    options = [ "defaults" "pquota" ]; # pquota est fortement recommandé par Longhorn
+    options = [ "defaults" "pquota" "x-systemd.automount" "noauto" "x-systemd.idle-timeout=0" ];
   };
 
   # 2. Création des répertoires de liaison AVANT les bind mounts

@@ -31,3 +31,19 @@ spec:
       priorityClass: "longhorn-critical"
     persistence:
       defaultClassReplicaCount: 1
+  postRenderers:
+    - kustomize:
+        patches:
+          - patch: |
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: longhorn-driver-deployer
+                namespace: longhorn-system
+              spec:
+                template:
+                  spec:
+                    initContainers:
+                      - name: wait-longhorn-manager
+                        # Échec immédiat, le Kubelet gère la boucle d'attente dynamique
+                        command: ["sh", "-c", "curl -f -m 1 -s -o /dev/null http://longhorn-backend:9500/v1"]

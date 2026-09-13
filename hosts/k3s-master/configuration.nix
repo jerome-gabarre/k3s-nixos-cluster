@@ -332,13 +332,13 @@
     '';
   };
 
-  systemd.timers.backup-config-gdrive = {
-    wantedBy = [ "timers.target" ];
-    partOf = [ "backup-config-gdrive.service" ];
-    timerConfig = {
-      OnCalendar = "daily";
-      Persistent = true;
-      RandomizedDelaySec = "5m";
+  # Surveille les écritures sur la DB k3s
+  systemd.paths.backup-config-gdrive = {
+    description = "Déclencheur inotify pour sauvegarde K3s vers GDrive";
+    wantedBy = [ "multi-user.target" ];
+    pathConfig = {
+      PathModified = "/var/lib/rancher/k3s/server/db/state.db-wal";
+      # Unit = "backup-config-gdrive.service" (implicite si même nom)
     };
   };
 
