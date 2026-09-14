@@ -71,11 +71,12 @@
           echo "📦 2/3 - Transfert des binaires vers le Master..."
           nix copy --no-check-sigs --to ssh-ng://root@$MASTER_IP $PXE_PATHS
                    
-          echo "🚀 3/3 - Évaluation et déploiement du Master NixOS..."
+          echo "🚀 3/3 - Évaluation et déploiement du Master NixOS (Build local WSL -> Push)..."
+          # Suppression de --build-host pour forcer la compilation sur WSL
           nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
-            --build-host root@$MASTER_IP --sudo
+            --use-remote-sudo
         )
 
         deploy-dns() (
