@@ -66,7 +66,7 @@
           nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
-            --use-remote-sudo
+            --sudo
         )
 
         deploy-dns() (
