@@ -60,12 +60,15 @@
 
         deploy-os() (
           set -e
-          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=12 -o IPQoS=none -o TCPKeepAlive=no"
+          
+          # Force Nix à utiliser ces options SSH, même s'il délègue à son daemon
+          export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15"
           
           echo "🚀 Évaluation, compilation (WSL) et déploiement vers le Master NixOS..."
           nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
+            --build-host localhost \
             --sudo
         )
 
