@@ -62,17 +62,7 @@
           set -e
           export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=12 -o IPQoS=none -o TCPKeepAlive=no"
           
-          echo "🚀 1/3 - Compilation native de l'image PXE (x86_64) sur WSL..."
-          PXE_PATHS=$(nix build --no-link --print-out-paths \
-                              .#nixosConfigurations.worker-pxe.config.system.build.toplevel \
-                              .#nixosConfigurations.worker-pxe.config.system.build.kernel \
-                              .#nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk)
-          
-          echo "📦 2/3 - Transfert des binaires vers le Master..."
-          nix copy --no-check-sigs --to ssh-ng://root@$MASTER_IP $PXE_PATHS
-                   
-          echo "🚀 3/3 - Évaluation et déploiement du Master NixOS (Build local WSL -> Push)..."
-          # Suppression de --build-host pour forcer la compilation sur WSL
+          echo "🚀 Évaluation, compilation (WSL) et déploiement vers le Master NixOS..."
           nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
