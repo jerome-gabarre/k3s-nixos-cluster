@@ -61,14 +61,14 @@
         deploy-os() (
           set -e
           
-          # Force Nix à utiliser ces options SSH, même s'il délègue à son daemon
+          # Force Nix à utiliser ces options SSH pour le transfert final
           export NIX_SSHOPTS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=15"
           
           echo "🚀 Évaluation, compilation (WSL) et déploiement vers le Master NixOS..."
           nixos-rebuild switch \
             --flake .#k3s-master \
             --target-host root@$MASTER_IP \
-            --build-host localhost \
+            --build-host "" \
             --sudo
         )
 
