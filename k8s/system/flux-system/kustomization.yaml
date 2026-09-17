@@ -12,6 +12,3 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/memory
         value: 2Gi
-      - op: replace
-        path: /spec/template/spec/containers/0/env/1/value
-        value: "1900MiB" # GOMEMLIMIT inférieur à la limite stricte
