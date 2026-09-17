@@ -61,12 +61,13 @@
   # NOYAU RPI4 (Le seul qui comprend le DSI correctement)
   # boot.kernelPackages = pkgs.linuxPackages_rpi4;
 
-  # Activation des cgroups mémoire
+  # Activation des cgroups mémoire et limitation stricte du CMA (GPU)
   boot.kernelParams = [
     "cgroup_enable=cpuset"
     "cgroup_memory=1"
     "cgroup_enable=memory"
     "systemd.unified_cgroup_hierarchy=1" # Active Cgroup v2 pour le contrôle strict des I/O par kubelet
+    "cma=64M" # Prévention du Kernel Panic OOM à l'amorçage
   ];
 
   # --- CONFIGURATIONS MATÉRIELLES SUPPLÉMENTAIRES ---
