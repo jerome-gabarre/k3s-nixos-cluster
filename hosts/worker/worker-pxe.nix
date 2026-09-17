@@ -70,6 +70,17 @@
     };
   };
 
+  # Activation du routage IPv4 (Vital pour Flannel WireGuard et MetalLB BGP)
+  boot.kernel.sysctl = {
+    "net.ipv4.ip_forward" = 1;
+  };
+
+  # Forcer SSH à attendre le montage persistant pour garantir l'identité de l'hôte
+  systemd.services.sshd = {
+    requires = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
+    after = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
+  };
+
   # Désactivation de l'extinction de l'écran (tty) pour lisibilité des crashs
   boot.kernelParams = [ "consoleblank=0" ];
 
@@ -202,13 +213,6 @@
       mkdir -p /var/lib/rancher/k3s/longhorn_default
       mkdir -p /var/lib/rancher/k3s/kubelet
       mkdir -p /var/lib/rancher/k3s/etc_rancher_node
-      mkdir -p /var/lib/rancher/k3s/journal
-
-      # Redirection forcée de journald vers le stockage d'état
-      umount /var/log/journal 2>/dev/null || true
-      rm -rf /var/log/journal
-      ln -s /var/lib/rancher/k3s/journal /var/log/journal
-      systemctl restart systemd-journald
     '';
   };
 
