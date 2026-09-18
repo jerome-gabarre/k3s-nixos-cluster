@@ -19,5 +19,5 @@ disable_overscan=1
 
 # --- CONFIGURATION ECRAN ---
 # On remet le pilote de secours pour garantir le boot
-dtoverlay=vc4-fkms-v3d
+# dtoverlay=vc4-fkms-v3d
 dtoverlay=gpio-fan,gpiopin=14,temp=60000
