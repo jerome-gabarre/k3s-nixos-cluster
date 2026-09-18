@@ -146,12 +146,13 @@
     ];
   };
 
-  # Clés SSH (Windows + Pi)
+  # Clés SSH (Windows + Pi + WSL)
   users.users.root = {
     initialHashedPassword = lib.mkForce null; # <-- C'est cette ligne qui fait taire l'avertissement
     openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s" 
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master" 
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx6r4XlHlJlLPL3ZoCX8+HCFt0grzzlffIuZDLckeqg jerom@jerome" # <-- Clé WSL ajoutée
     ];
   };
 
