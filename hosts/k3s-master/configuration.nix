@@ -90,8 +90,8 @@
     "goodix" 
   ];
   
-  # Activation de l'accélération matérielle vidéo (Nécessaire pour vc4)
-  hardware.graphics.enable = true;
+  # Doit impérativement être supprimé ou défini à false :
+  # hardware.graphics.enable = true;
 
   # --- VOS CONFIGURATIONS ---
 
