@@ -271,7 +271,10 @@
       ROTA=$(lsblk -d -n -o ROTA "/dev/$DISK_NAME" | tr -d ' ' || echo "0")
       if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
       
-      echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
+      # FIX: Idempotence stricte pour ne pas déclencher le 'mismatch' Longhorn
+      if [ ! -f /var/lib/longhorn/default-disks.json ]; then
+        echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
+      fi
 
       PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
       export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
