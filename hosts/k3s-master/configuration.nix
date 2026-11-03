@@ -1,124 +1,175 @@
 # =====================================================================
-# ⚠️ ARCHITECTURE MASTER (RASPBERRY PI 4 - ARM64 / 8GB RAM)
+# ⚠️ RÔLE : CONTROL-PLANE (MASTER - ARM64 / 8GB RAM)
 # =====================================================================
-# RÈGLES DE DÉPLOIEMENT HYBRIDE (NE PAS MODIFIER SUR LE SERVEUR) :
-#
-# 1. DÉPLOIEMENT OS (NixOS) : Mode "Push" depuis WSL.
-#    -> Ne JAMAIS lancer `nixos-rebuild switch` directement ici (Risque OOM).
-#    -> Le build est déporté : utiliser les commandes `cd mon-infrastructure`, `nix-shell` puis `deploy-os` depuis le shell.
-#
-# 2. DÉPLOIEMENT APPLICATIF (k3s) : Mode "Pull" (GitOps via FluxCD).
-#    -> L'état du cluster applicatif est géré de manière autonome.
-#    -> Toute modification manuelle des pods via SSH/kubectl sera écrasée.
-#    -> Modifier les manifestes locaux et pousser via les commandes `cd mon-infrastructure`, `nix-shell` puis `git-sync`.
+# 1. DÉPLOIEMENT OS (NixOS) : Mode "Push" depuis le poste d'administration (`deploy-os`).
+# 2. DÉPLOIEMENT APPLICATIF (k3s) : Mode "Pull" GitOps via FluxCD (`git-sync`).
 # =====================================================================
 
-{ config, pkgs, clusterIps, inputs, ... }:
+{ config, pkgs, lib, clusterIps, inputs, ... }:
 
 {
-  imports = [ 
-    ./hardware-configuration.nix 
+  imports = [
+    ./hardware-configuration.nix
   ];
 
-  # --- ARCHITECTURE CIBLE DU MASTER ---
   nixpkgs.hostPlatform = "aarch64-linux";
+  networking.hostName = "k3s-master";
 
-  services.journald.extraConfig = ''
-    SystemMaxUse=100M
-    MaxRetentionSec=3d
-  '';
-
-  # Injection déclarative du config.txt dans la partition de boot
-  system.activationScripts.rpi-config = ''
-    echo "Génération de /boot/firmware/config.txt..."
-    cat ${./config_rpi4.txt} > /boot/firmware/config.txt
-  '';
-
-  # --- ACTIVATION DE L'ÉMULATION X86_64 (CRITIQUE) ---
-  # Permet au Raspberry Pi (ARM) d'assembler l'image pour le PC (Intel/AMD)
-  # boot.binfmt.emulatedSystems = [ "x86_64-linux" ];
-
-  ## 🔒 OPTIMISATIONS ARM64 : Prévention des Cache Miss
-  
-  # 1. Désactivation de la documentation locale
-  documentation.nixos.enable = false;
-  documentation.doc.enable = false;
-  documentation.man.enable = false;
-  documentation.info.enable = false;
-
-  # 2. Forçage du noyau Linux LTS standard
-  boot.kernelPackages = pkgs.lib.mkForce pkgs.linuxPackages;
-
-  # 3. Contournement de la limite matérielle ASLR du RPi4 (VA 39-bit)
-  boot.kernel.sysctl = {
-    "vm.mmap_rnd_bits" = 24;
+  # Désactivation de la documentation locale (zéro surcharge I/O et store)
+  documentation = {
+    nixos.enable = false;
+    doc.enable = false;
+    man.enable = false;
+    info.enable = false;
   };
 
-  # --- BOOTLOADER ET NOYAU ---
+  # Noyau Linux LTS standard + contournement ASLR VA 39-bit ARM64
+  boot.kernelPackages = lib.mkForce pkgs.linuxPackages;
   boot.loader.grub.enable = false;
-  # boot.loader.generic-extlinux-compatible.enable = true;
-  
-  # NOYAU RPI4 (Le seul qui comprend le DSI correctement)
-  # boot.kernelPackages = pkgs.linuxPackages_rpi4;
+  boot.kernel.sysctl."vm.mmap_rnd_bits" = 24;
+  boot.kernelParams = [ "cma=64M" ];
 
-  # Activation des cgroups mémoire et limitation stricte du CMA (GPU)
-  boot.kernelParams = [
-    "cgroup_enable=cpuset"
-    "cgroup_memory=1"
-    "cgroup_enable=memory"
-    "systemd.unified_cgroup_hierarchy=1" # Active Cgroup v2 pour le contrôle strict des I/O par kubelet
-    "cma=64M" # Prévention du Kernel Panic OOM à l'amorçage
-  ];
+  # Injection déclarative atomique de config.txt
+  system.activationScripts.rpi-config = ''
+    if [ -d /boot/firmware ]; then
+      install -m 0644 ${./config_rpi4.txt} /boot/firmware/config.txt.tmp
+      mv -f /boot/firmware/config.txt.tmp /boot/firmware/config.txt
+    fi
+  '';
 
-  # --- CONFIGURATIONS MATÉRIELLES SUPPLÉMENTAIRES ---
+  fileSystems."/boot/firmware" = {
+    device = "/dev/disk/by-uuid/2178-694E";
+    fsType = "vfat";
+    options = [ "fmask=0022" "dmask=0022" "noatime" ];
+  };
+
   hardware.deviceTree.enable = false;
   hardware.i2c.enable = true;
+  boot.kernelModules = [ "i2c-dev" "i2c-bcm2835" "goodix" ];
+  boot.blacklistedKernelModules = [ "brcmfmac" "brcmutil" ];
 
-  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
-  services.openiscsi.enable = true;
-  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
+  powerManagement.cpuFreqGovernor = "performance";
 
+  # --- PRÉREQUIS LONGHORN (ISCSI) AUTO-RÉPARATEUR ---
+  services.openiscsi = {
+    enable = true;
+    name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
+  };
+  systemd.services.iscsid.serviceConfig = {
+    Restart = lib.mkForce "always";
+    RestartSec = lib.mkForce "2s";
+  };
   systemd.tmpfiles.rules = [
     "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
     "L+ /usr/local/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
   ];
 
-  # --- ALLOCATION RAM VIDEO ET MODULES ---
-  boot.kernelModules = [ 
-    "i2c-dev" 
-    "i2c-bcm2835" 
-    "goodix" 
-  ];
-  
-  # Doit impérativement être supprimé ou défini à false :
-  # hardware.graphics.enable = true;
-
-  # --- VOS CONFIGURATIONS ---
-
-  # Configuration du serveur SSH
+  # --- SÉCURITÉ SSH & UTILISATEURS ---
   services.openssh = {
     enable = true;
-    	settings = {
-  	PasswordAuthentication = false;
-  	PermitRootLogin = "prohibit-password"; # Autorise Root uniquement via Clé SSH
-	};
+    settings = {
+      PasswordAuthentication = false;
+      PermitRootLogin = "prohibit-password";
+    };
   };
 
-  # --- MAINTENANCE K3S : OPTIMISATION DE LA BASE SQLITE ---
+  security.sudo.wheelNeedsPassword = false;
+
+  users.users.nixos = {
+    isNormalUser = true;
+    extraGroups = [ "wheel" ];
+    openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
+    ];
+  };
+
+  users.users.root.openssh.authorizedKeys.keys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx6r4XlHlJlLPL3ZoCX8+HCFt0grzzlffIuZDLckeqg jerom@jerome"
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBc1GQqEyCWsi1xcnk3DxSo6LNdLjIV/4ACyyjlJobpi PC Bureau - Jerome"
+  ];
+
+  # --- RÉSEAU & PARE-FEU ---
+  networking.networkmanager.enable = true;
+  networking.firewall = {
+    enable = true;
+    checkReversePath = "loose";
+    trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
+    allowedTCPPorts = [
+      22    # SSH
+      6443  # API Kubernetes k3s
+      80    # HTTP
+      443   # HTTPS
+      8088  # Pixiecore PXE HTTP/Status
+    ];
+    allowedTCPPortRanges = [
+      { from = 30000; to = 32767; }
+    ];
+    allowedUDPPorts = [
+      67    # ProxyDHCP Pixiecore
+      69    # TFTP Pixiecore
+      4011  # PXE Pixiecore
+      8472  # Flannel VXLAN
+      51820 # Flannel WireGuard IPv4
+      51821 # Flannel WireGuard IPv6
+    ];
+  };
+
+  environment.etc."secrets.yaml".source = ../../secrets.yaml;
+
+  # --- ORCHESTRATION K3S (RÔLE CONTROL-PLANE PROTÉGÉ) ---
+  services.k3s = {
+    enable = true;
+    # renovate: datasource=github-releases depName=k3s-io/k3s
+    package = pkgs.k3s;
+    role = "server";
+    extraFlags = toString [
+      "--node-taint=node-role.kubernetes.io/control-plane=true:NoSchedule"
+      "--node-ip=${clusterIps.master}"
+      "--advertise-address=${clusterIps.master}"
+      "--node-label=svccontroller.k3s.cattle.io/enable=false"
+      "--disable=servicelb"
+      "--disable=traefik"
+      "--disable=local-storage"
+      "--flannel-backend=wireguard-native"
+      "--kubelet-arg=container-log-max-size=10Mi"
+      "--kubelet-arg=container-log-max-files=3"
+      "--kubelet-arg=max-pods=60"
+      "--kube-apiserver-arg=max-requests-inflight=400"
+      "--kube-apiserver-arg=max-mutating-requests-inflight=200"
+    ];
+  };
+
+  # Résilience maximale et bornage mémoire Go sur k3s control-plane
+  systemd.services.k3s = {
+    unitConfig.StartLimitIntervalSec = lib.mkForce 0;
+    environment = {
+      GOMEMLIMIT = "2500MiB";
+      GOGC = "80";
+    };
+    serviceConfig = {
+      Restart = lib.mkForce "always";
+      RestartSec = lib.mkForce "3s";
+      MemoryHigh = "2800M";
+      MemoryMax = "3200M";
+      OOMScoreAdjust = lib.mkForce (-900);
+    };
+  };
+
+  # --- MAINTENANCE SQLITE ASYNCHRONE ET COMPACTAGE WAL ---
   systemd.services.k3s-sqlite-vacuum = {
-    description = "Defragmentation et nettoyage de la base K3s (SQLite)";
+    description = "Optimisation et compactage WAL de la base K3s (SQLite)";
     path = [ pkgs.sqlite ];
     serviceConfig = {
       Type = "oneshot";
       User = "root";
+      IOSchedulingClass = "idle";
+      CPUSchedulingPolicy = "idle";
     };
     script = ''
-      echo "Démarrage de l'optimisation de la base K3s..."
-      # busy_timeout: attend jusqu'à 5s si k3s verrouille la base
-      # wal_checkpoint(TRUNCATE): force l'écriture du journal WAL dans la base principale
-      # VACUUM: reconstruit le fichier pour libérer l'espace disque physique
-      sqlite3 /var/lib/rancher/k3s/server/db/state.db 'PRAGMA busy_timeout=5000; PRAGMA wal_checkpoint(TRUNCATE); VACUUM;'
-      echo "Optimisation terminée."
+      sqlite3 /var/lib/rancher/k3s/server/db/state.db \
+        'PRAGMA busy_timeout=10000; PRAGMA synchronous=NORMAL; PRAGMA journal_mode=WAL; PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize; VACUUM;'
     '';
   };
 
@@ -126,255 +177,128 @@
     wantedBy = [ "timers.target" ];
     partOf = [ "k3s-sqlite-vacuum.service" ];
     timerConfig = {
-      OnCalendar = "*-*-* 03:00:00"; # Tous les jours à 3h00 du matin
-      Persistent = true;                 # Rattrape l'exécution si le Pi était éteint
-      RandomizedDelaySec = "10m";        # Évite les pics de charge à la seconde pile
+      OnCalendar = "*-*-* 03:00:00";
+      Persistent = true;
+      RandomizedDelaySec = "10m";
     };
   };
 
-  # Définition déclarative de l'utilisateur
-  users.users.nixos = {
-    isNormalUser = true;
-    extraGroups = [ "wheel" ]; # Permet d'utiliser sudo
-    # Clé SSH :
-    openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
-    ];
-  };
-
-  # Définition de l'utilisateur système root
-  users.users.root = {
-    openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s" 
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master"
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx6r4XlHlJlLPL3ZoCX8+HCFt0grzzlffIuZDLckeqg jerom@jerome" # <-- Clé WSL
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBc1GQqEyCWsi1xcnk3DxSo6LNdLjIV/4ACyyjlJobpi PC Bureau - Jerome" # <-- Clé PC bureau
-    ];
-  };
-
-  # Autoriser l'élévation de privilèges sans mot de passe pour le groupe wheel (puisque l'authentification se fait par clé SSH)
-  security.sudo.wheelNeedsPassword = false;
-
-
-  # Activation du serveur X11 (nécessaire pour l'interface graphique)
-  # services.xserver.enable = true;
-  # Activation de l'environnement de bureau léger XFCE
-  # services.xserver.desktopManager.xfce.enable = true;
-
-  # services.xserver.displayManager.lightdm.greeters.gtk.extraConfig = ''
-  #   keyboard=onboard
-  #   show-indicators=~language;~a11y;~session;~power
-  # '';
-
-  # Activation du serveur RDP (pour la Connexion Bureau à distance Windows)
-  # services.xrdp = {
-  #   enable = true;
-  #   defaultWindowManager = "xfce4-session"; # Indique à xrdp de lancer XFCE
-  #   openFirewall = true; # Ouvre automatiquement le port 3389 dans le pare-feu
-  # };
-
-  # --- MONTAGE AUTOMATIQUE DU FIRMWARE (OBLIGATOIRE POUR SAUVEGARDE) ---
-  fileSystems."/boot/firmware" = {
-    device = "/dev/disk/by-uuid/2178-694E";
-    fsType = "vfat";
-    # Options pour que l'utilisateur root puisse lire/écrire sans souci
-    options = [ "fmask=0022" "dmask=0022" ];
-  };
-
-  # --- PARAMÈTRE SYSTÈME OBLIGATOIRE ---
-  # Cette ligne est requise pour la gestion des versions d'état de NixOS.
-  system.stateVersion = "26.05";
-
-  # --- SÉCURITÉ : PARE-FEU MASTER ---
-  networking.firewall.enable = true;
-
-  # TOLÉRANCE AU ROUTAGE ASYMÉTRIQUE DU CNI (FLANNEL)
-  networking.firewall.checkReversePath = "loose";
-  
-  # Confiance absolue sur les interfaces réseau internes du cluster k3s
-  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
-  # Ouverture des ports vitaux pour la grappe
-  networking.firewall.allowedTCPPorts = [ 
-    22    # SSH (Authentification sécurisée par clé configurée)
-    6443  # API Kubernetes k3s (Communication vitale avec les Workers)
-    80    # Ingress HTTP
-    8088  # API/Statut Pixiecore
-  ];
-
-  # Ouverture de la plage NodePort pour l'accès externe aux applications
-  networking.firewall.allowedTCPPortRanges = [
-    { from = 30000; to = 32767; }
-  ];
-  
-  networking.firewall.allowedUDPPorts = [
-    8472  # Flannel VXLAN (Communication overlay inter-noeuds k3s)
-    51820 # Flannel WireGuard IPv4
-    51821 # Flannel WireGuard IPv6
-  ];
-
-  # --- CONFIGURATION RÉSEAU ET WI-FI ---
-  # NetworkManager est le standard industriel pour gérer le Wi-Fi facilement
-  networking.networkmanager.enable = true;
-  boot.blacklistedKernelModules = [ "brcmfmac" "brcmutil" ];
-  # Optionnel : définir le nom de la machine sur le réseau
-  networking.hostName = "k3s-master";
-
-  # Déploiement du fichier de secrets chiffré
-  environment.etc."secrets.yaml".source = ../../secrets.yaml;
-
-  # --- OPTIMISATIONS DES PERFORMANCES (NIXOS) ---
-  
-  # Forcer le processeur en mode performance (utile pour l'overclocking et etcd)
-  powerManagement.cpuFreqGovernor = "performance";
-  
-  # Activation du ZRAM (Ultra Critique)
-  zramSwap.enable = true;
-
-  # --- ORCHESTRATION K3S (NŒUD MAÎTRE) ---
-
-  services.k3s = {
-    enable = true;
-    # renovate: datasource=github-releases depName=k3s-io/k3s
-    package = pkgs.k3s;
-    role = "server"; # Rôle master
-    
-    # Déclaration explicite du Taint et autres arguments de démarrage
-    extraFlags = toString [
-      # Empêche la planification des pods normaux sur ce noeud
-      "--node-taint node-role.kubernetes.io/control-plane=true:NoSchedule"
-      # On force l'IP filaire pour toutes les communications du cluster
-      "--node-ip=${clusterIps.master}"
-      "--advertise-address=${clusterIps.master}"
-      "--node-label svccontroller.k3s.cattle.io/enable=false"
-      # Désactivation du LoadBalancer par défaut (Klipper) pour installer MetalLB
-      "--disable=servicelb"
-      # Activation de WireGuard
-      "--flannel-backend=wireguard-native"
-      # Désactivation du Traefik par défaut pour gestion GitOps via Flux
-      "--disable=traefik"
-      "--disable=local-storage"
-      "--kubelet-arg=container-log-max-size=10Mi"
-      "--kubelet-arg=container-log-max-files=3"
-    ];
-  };
-
-  # --- PAQUETS SYSTÈME ---
-  environment.systemPackages = with pkgs; [
-    vim
-    wget
-    git
-    rclone
-    libinput   # Pour tester le tactile
-    i2c-tools  # Pour scanner le bus (I2C)
-    usbutils   # Commande lsusb
-    lshw
-    inxi
-    pciutils
-    hwinfo
-    btop
-    onboard
-    util-linux
-    nfs-utils
-    openiscsi
-    nftables
-
-  ];
-
-  # --- SAUVEGARDE AUTOMATIQUE VERS GOOGLE DRIVE ---
+  # --- SAUVEGARDE PARALLÈLE EN RAM (/dev/shm) COMPRESSÉE ZSTD VERS GOOGLE DRIVE ---
   systemd.services.backup-config-gdrive = {
-    description = "Backup NixOS config, K3s state and secrets to Google Drive";
-    # Ajout de sops et ssh-to-age dans les dépendances
-    path = [ pkgs.coreutils pkgs.inetutils pkgs.sqlite pkgs.rclone pkgs.sops pkgs.ssh-to-age ];
+    description = "Sauvegarde parallèle en RAM (ZSTD) de NixOS et K3s vers Google Drive";
+    path = with pkgs; [ coreutils inetutils sqlite rclone sops ssh-to-age gnutar zstd ];
     serviceConfig = {
       Type = "oneshot";
       User = "root";
+      MemoryMax = "512M";
     };
     script = ''
-      # 1. Variables
+      set -euo pipefail
       DATE=$(date +%Y-%m-%d)
       HOSTNAME=$(hostname)
-      BACKUP_DIR="/tmp/backup_staging"
-      RCLONE_CONF="/run/rclone_gdrive.conf"
+      BACKUP_DIR="/dev/shm/backup_staging"
+      RCLONE_CONF="/dev/shm/rclone_gdrive.conf"
       REMOTE="gdrive:NixOS-Backups/$HOSTNAME"
 
-      echo "🛡️ Déchiffrement de la configuration rclone en RAM..."
-      export SOPS_AGE_KEY=$(ssh-to-age -private-key -i /etc/ssh/ssh_host_ed25519_key)
-      sops -d --extract '["rclone_conf"]' /etc/secrets.yaml > $RCLONE_CONF
-      chmod 600 $RCLONE_CONF
+      cleanup() {
+        rm -rf "$BACKUP_DIR" "$RCLONE_CONF"
+      }
+      trap cleanup EXIT
 
-      # 2. Préparation
-      rm -rf $BACKUP_DIR
-      mkdir -p $BACKUP_DIR/nixos
-      mkdir -p $BACKUP_DIR/k3s-state
+      rm -rf "$BACKUP_DIR"
+      mkdir -p "$BACKUP_DIR/nixos" "$BACKUP_DIR/k3s-state"
 
-      # 3. Copie des fichiers vitaux (Architecture NixOS)
-      echo "Sauvegarde de l'environnement NixOS local..."
-      cp -a /etc/nixos/. $BACKUP_DIR/nixos/
-      rm -f $BACKUP_DIR/nixos/result
-      if [ -f /boot/firmware/config.txt ]; then
-        cp /boot/firmware/config.txt $BACKUP_DIR/
-      fi
+      # 1. Extraction et préparation en sous-processus parallèles en RAM (/dev/shm)
+      (
+        export SOPS_AGE_KEY=$(ssh-to-age -private-key -i /etc/ssh/ssh_host_ed25519_key)
+        sops -d --extract '["rclone_conf"]' /etc/secrets.yaml > "$RCLONE_CONF"
+        chmod 600 "$RCLONE_CONF"
+      ) &
 
-      # 4. Sauvegarde de l'état K3s (Cerveau du Cluster)
-      echo "Sauvegarde de la base de données K3s et des certificats TLS..."
-      sqlite3 /var/lib/rancher/k3s/server/db/state.db ".backup '$BACKUP_DIR/k3s-state/state.db'"
-      cp -a /var/lib/rancher/k3s/server/tls $BACKUP_DIR/k3s-state/
+      (
+        if [ -d /etc/nixos ]; then
+          cp -a /etc/nixos/. "$BACKUP_DIR/nixos/"
+          rm -f "$BACKUP_DIR/nixos/result"
+        fi
+        [ -f /boot/firmware/config.txt ] && cp /boot/firmware/config.txt "$BACKUP_DIR/" || true
+      ) &
 
-      # 5. Envoi Cloud via la configuration éphémère
-      echo "Upload vers Google Drive..."
-      rclone --config $RCLONE_CONF sync $BACKUP_DIR "$REMOTE/latest" --tpslimit 4
-      rclone --config $RCLONE_CONF copy $BACKUP_DIR "$REMOTE/history/$DATE" --tpslimit 4
-      
-      echo "Nettoyage des archives de plus de 30 jours..."
-      rclone --config $RCLONE_CONF delete "$REMOTE/history" --min-age 30d --tpslimit 4 || true
-      rclone --config $RCLONE_CONF rmdirs "$REMOTE/history" --leave-root --tpslimit 4 || true
-      
-      # 6. Nettoyage local et purge de la configuration en RAM
-      rm -rf $BACKUP_DIR
-      rm -f $RCLONE_CONF
-      echo "Sauvegarde terminée avec succès."
+      (
+        sqlite3 /var/lib/rancher/k3s/server/db/state.db ".timeout 10000" ".backup '$BACKUP_DIR/k3s-state/state.db'"
+      ) &
+
+      (
+        cp -a /var/lib/rancher/k3s/server/tls "$BACKUP_DIR/k3s-state/"
+      ) &
+
+      wait
+
+      # 2. Compression multi-thread ZSTD en RAM pour minimiser les transactions I/O Cloud
+      ARCHIVE_FILE="$BACKUP_DIR/cluster-state-$DATE.tar.zst"
+      tar -C "$BACKUP_DIR" -I "zstd -T0 -9" -cf "$ARCHIVE_FILE" nixos k3s-state
+
+      # 3. Synchronisation parallèle rclone
+      rclone --config "$RCLONE_CONF" sync "$BACKUP_DIR" "$REMOTE/latest" \
+        --transfers 8 --checkers 16 --tpslimit 8 --fast-list
+      rclone --config "$RCLONE_CONF" copy "$ARCHIVE_FILE" "$REMOTE/history/$DATE" \
+        --transfers 8 --checkers 16 --tpslimit 8
+
+      # 4. Purge asynchrone des archives de plus de 30 jours
+      rclone --config "$RCLONE_CONF" delete "$REMOTE/history" --min-age 30d --tpslimit 8 || true
+      rclone --config "$RCLONE_CONF" rmdirs "$REMOTE/history" --leave-root --tpslimit 8 || true
     '';
   };
 
-  # Surveille les écritures sur la DB k3s
   systemd.paths.backup-config-gdrive = {
-    description = "Déclencheur inotify pour sauvegarde K3s vers GDrive";
+    description = "Déclencheur événementiel inotify pour sauvegarde K3s vers GDrive";
     wantedBy = [ "multi-user.target" ];
     pathConfig = {
       PathModified = "/var/lib/rancher/k3s/server/db/state.db-wal";
-      # Unit = "backup-config-gdrive.service" (implicite si même nom)
     };
   };
 
-  # --- CONFIGURATION DU SERVEUR PXE (PIXIECORE) sur la configuration Flake exportée ---
+  # --- SERVEUR PXE (PIXIECORE - GO NATIF) AUTO-RÉPARATEUR ---
   services.pixiecore = {
     enable = true;
     openFirewall = true;
     dhcpNoBind = true;
     mode = "boot";
-    port = 8088;         # On libère le port 80 pour K3s
+    port = 8088;
     statusPort = 8088;
     kernel = "${inputs.self.nixosConfigurations.worker-pxe.config.system.build.kernel}/bzImage";
     initrd = "${inputs.self.nixosConfigurations.worker-pxe.config.system.build.netbootRamdisk}/initrd";
-    # Les paramètres passés au noyau du worker au démarrage
     cmdLine = "init=${inputs.self.nixosConfigurations.worker-pxe.config.system.build.toplevel}/init loglevel=4";
   };
 
-  # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
-  nix = {
-    gc = {
-      automatic = true;
-      dates = "daily";
-      options = "--delete-older-than 1d";
-    };
-    optimise = {
-      automatic = true;
-      dates = [ "daily" ];
-    };
-    settings = {
-      auto-optimise-store = true;
-      experimental-features = [ "nix-command" "flakes" ];
+  systemd.services.pixiecore = {
+    unitConfig.StartLimitIntervalSec = lib.mkForce 0;
+    environment.GOMEMLIMIT = "256MiB";
+    serviceConfig = {
+      Restart = lib.mkForce "always";
+      RestartSec = lib.mkForce "2s";
+      MemoryMax = "300M";
     };
   };
 
+  environment.systemPackages = with pkgs; [
+    vim
+    wget
+    git
+    rclone
+    libinput
+    i2c-tools
+    usbutils
+    lshw
+    inxi
+    pciutils
+    hwinfo
+    btop
+    util-linux
+    nfs-utils
+    openiscsi
+    nftables
+    zstd
+  ];
+
+  system.stateVersion = "26.05";
 }

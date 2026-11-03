@@ -5,6 +5,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
+  timeout: 10m
   targetNamespace: longhorn-system
   chart:
     spec:
@@ -14,11 +15,19 @@ spec:
         kind: HelmRepository
         name: longhorn
         namespace: flux-system
+  driftDetection:
+    mode: enabled
   install:
     createNamespace: true
     crds: CreateReplace
+    remediation:
+      retries: -1
   upgrade:
     crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: -1
+      strategy: rollback
   values:
     csi:
       kubeletRootDir: /var/lib/kubelet
@@ -29,8 +38,22 @@ spec:
     defaultSettings:
       defaultReplicaCount: 1
       priorityClass: "longhorn-critical"
+      createDefaultDiskLabeledNodes: false
+      defaultDataPath: /var/lib/longhorn
+      concurrentReplicaRebuildPerNodeLimit: 5
+      backupCompressionMethod: lz4
+      fastReplicaRebuildEnabled: true
+      autoSalvage: true
     persistence:
+      defaultClass: true
       defaultClassReplicaCount: 1
+      defaultDataLocality: best-effort
+      reclaimPolicy: Retain
+    ingress:
+      enabled: true
+      ingressClassName: traefik
+      host: longhorn.home.arpa
+      path: /
   postRenderers:
     - kustomize:
         patches:
@@ -45,5 +68,4 @@ spec:
                   spec:
                     initContainers:
                       - name: wait-longhorn-manager
-                        # Échec immédiat, le Kubelet gère la boucle d'attente dynamique
                         command: ["sh", "-c", "curl -f -m 1 -s -o /dev/null http://longhorn-backend:9500/v1"]

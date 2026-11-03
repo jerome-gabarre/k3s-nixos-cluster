@@ -4,9 +4,12 @@ metadata:
   name: cluster-apps
   namespace: flux-system
 spec:
-  interval: 1m
+  interval: 2m0s
+  retryInterval: 1m0s
+  timeout: 5m0s
   path: ./k8s/apps
   prune: true
+  wait: true
   sourceRef:
     kind: GitRepository
     name: flux-system

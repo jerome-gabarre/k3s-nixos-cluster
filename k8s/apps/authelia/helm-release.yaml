@@ -5,6 +5,10 @@ metadata:
   namespace: default
 spec:
   interval: 10m
+  timeout: 5m
+  dependsOn:
+    - name: lldap
+      namespace: default
   chart:
     spec:
       chart: authelia
@@ -13,14 +17,27 @@ spec:
         kind: HelmRepository
         name: authelia
         namespace: flux-system
+  driftDetection:
+    mode: enabled
   install:
     crds: CreateReplace
+    remediation:
+      retries: -1
   upgrade:
     crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: -1
+      strategy: rollback
   values:
     pod:
       kind: Deployment
       replicas: 1
+      env:
+        - name: GOMEMLIMIT
+          value: "180MiB"
+        - name: GOGC
+          value: "80"
       securityContext:
         pod:
           fsGroup: 1000
@@ -36,32 +53,28 @@ spec:
       resources:
         requests:
           cpu: 50m
-          memory: 100Mi
+          memory: 96Mi
         limits:
           cpu: 200m
           memory: 200Mi
-    
-    # Nouvelle racine de persistance
     persistence:
       enabled: true
       storageClass: longhorn
       accessModes:
         - ReadWriteOnce
       size: 1Gi
-    
-    # Ingress avec classe Traefik (nécessaire pour la prise en charge)
     ingress:
       enabled: true
       className: traefik
-
     secret:
       existingSecret: authelia-secrets
       additionalSecrets:
-        authelia-secrets: {} # Laisse le chart créer le dossier /secrets/authelia-secrets/
-                           
-    # Refonte du ConfigMap avec montage dynamique des secrets par clé
+        authelia-secrets: {}
     configMap:
       theme: dark
+      log:
+        level: info
+        format: json
       server:
         port: 9091
       totp:
@@ -73,7 +86,7 @@ spec:
             path: JWT_SECRET
       authentication_backend:
         ldap:
-          enabled: true # <-- Activation explicite requise
+          enabled: true
           implementation: custom
           address: ldap://lldap-svc.default.svc.cluster.local:3890
           timeout: 5s
@@ -95,8 +108,7 @@ spec:
           secret_name: authelia-secrets
           path: SESSION_SECRET
         cookies:
-          - domain: auth.home.arpa # <-- Correction du domaine cookie
-            # default_redirection_url supprimé pour éviter la boucle
+          - domain: auth.home.arpa
       storage:
         encryption_key:
           secret_name: authelia-secrets

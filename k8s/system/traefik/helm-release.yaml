@@ -5,16 +5,28 @@ metadata:
   namespace: flux-system
 spec:
   interval: 10m
+  timeout: 5m
   targetNamespace: traefik-system
+  dependsOn:
+    - name: metallb
+      namespace: flux-system
   install:
     createNamespace: true
     crds: CreateReplace
+    remediation:
+      retries: -1
   upgrade:
     crds: CreateReplace
+    cleanupOnFail: true
+    remediation:
+      retries: -1
+      strategy: rollback
+  driftDetection:
+    mode: enabled
   chart:
     spec:
       chart: traefik
-      version: "42.2.0"
+      version: "42.0.0"
       sourceRef:
         kind: HelmRepository
         name: traefik
@@ -22,7 +34,11 @@ spec:
   values:
     deployment:
       kind: DaemonSet
-    # 1. Garantie que Traefik ne tourne que sur un Worker
+    env:
+      - name: GOMEMLIMIT
+        value: "250MiB"
+      - name: GOGC
+        value: "80"
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
@@ -30,7 +46,6 @@ spec:
             - matchExpressions:
               - key: node-role.kubernetes.io/control-plane
                 operator: DoesNotExist
-    # 2. Optimisation du routage réseau MetalLB -> Worker
     service:
       type: LoadBalancer
       spec:

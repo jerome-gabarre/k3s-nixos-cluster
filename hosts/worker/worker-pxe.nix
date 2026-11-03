@@ -1,16 +1,37 @@
+# =====================================================================
+# ⚠️ RÔLE : WORKER PXE STATELESS (DATA PLANE & STORAGE PLANE)
+# =====================================================================
 { config, pkgs, lib, clusterIps, inputs, ... }:
 
 {
-  # Import du module officiel pour image RAM
   imports = [
     "${inputs.nixpkgs}/nixos/modules/installer/netboot/netboot-minimal.nix"
   ];
 
-  # Architecture ciblée : PC Standard
   nixpkgs.hostPlatform = "x86_64-linux";
 
+  # Compression maximale ZSTD de l'initrd PXE pour un transfert réseau ultra-rapide
+  boot.initrd.compressor = lib.mkForce "zstd";
+  boot.initrd.compressorArgs = lib.mkForce [ "-19" "-T0" ];
+  boot.zfs.forceImportRoot = false;
+  boot.kernelParams = [ "consoleblank=0" ];
+
+  # Support matériel universel multi-constructeurs (Realtek, Intel, Broadcom, AMD, NVIDIA)
+  hardware.enableRedistributableFirmware = true;
+
+  # Journalisation en RAM compressée (OS stateless)
+  services.journald.extraConfig = lib.mkForce ''
+    Storage=volatile
+    Compress=yes
+    RateLimitIntervalSec=0
+    RateLimitBurst=0
+    RuntimeMaxUse=64M
+    MaxRetentionSec=1d
+  '';
+
+  # --- ATTRIBUTION DYNAMIQUE DU HOSTNAME (ÉVÉNEMENTIEL PUR, ZÉRO SLEEP) ---
   systemd.services.set-deterministic-hostname = {
-    description = "Set deterministic hostname based on DMI/SMBIOS";
+    description = "Attribution déterministe du hostname via SMBIOS/DMI et route par défaut";
     before = [ "k3s.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -19,125 +40,94 @@
       Type = "oneshot";
       RemainAfterExit = true;
     };
-    path = with pkgs; [ iproute2 coreutils dmidecode gawk nettools ];
+    path = with pkgs; [ iproute2 coreutils dmidecode gawk nettools xxd ];
     script = ''
-      # Fast-path : vérification immédiate
+      set -euo pipefail
       if ! ip -4 route show | grep -q "^default"; then
-        echo "Attente événementielle de la route par défaut..."
-        # Lancement en arrière-plan pour forcer la terminaison via PID et éviter le deadlock netlink
-        (ip -4 monitor route & echo $! > /tmp/ip_mon.pid) | grep -q -m 1 "default"
-        kill $(cat /tmp/ip_mon.pid) 2>/dev/null || true
+        (ip -4 monitor route & echo $! > /dev/shm/ip_mon.pid) | grep -q -m 1 "default"
+        kill $(cat /dev/shm/ip_mon.pid) 2>/dev/null || true
+        rm -f /dev/shm/ip_mon.pid
       fi
 
-      DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5}' | head -n 1)
-
-      # Extraction dynamique basée sur le SMBIOS (UUID de la carte mère)
-      SYSTEM_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d '-' -f 1)
-      
-      if [ -n "$SYSTEM_UUID" ]; then
+      SYSTEM_UUID=$(cat /sys/class/dmi/id/product_uuid 2>/dev/null | tr '[:upper:]' '[:lower:]' | cut -d '-' -f 1 || true)
+      if [ -n "$SYSTEM_UUID" ] && [ "$SYSTEM_UUID" != "ffffffff" ]; then
         TARGET_HOSTNAME="worker-$SYSTEM_UUID"
       else
-        TARGET_HOSTNAME="worker-generic-$(head -c 4 /dev/urandom | xxd -p)"
+        DEFAULT_IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
+        MAC_SUFFIX=$(cat "/sys/class/net/$DEFAULT_IFACE/address" 2>/dev/null | tr -d ':' | tail -c 7 || head -c 3 /dev/urandom | xxd -p)
+        TARGET_HOSTNAME="worker-$MAC_SUFFIX"
       fi
 
-      echo "Assignation du hostname: $TARGET_HOSTNAME"
       hostname "$TARGET_HOSTNAME"
     '';
   };
 
-  # Bloque le démarrage de K3s tant que la route par défaut n'est pas établie
   systemd.services.NetworkManager-wait-online.enable = true;
 
-  # On intègre le fichier chiffré dans le système du Worker
-  environment.etc."secrets.yaml".source = ../../secrets.yaml;
-
-  # Désactivation de l'import forcé ZFS pour purger l'avertissement d'évaluation
-  boot.zfs.forceImportRoot = false;
-
-  # --- CRITIQUE POUR LE MATÉRIEL DE RÉCUPÉRATION ---
-  # Charge tous les pilotes propriétaires (Realtek, Intel, Broadcom...)
-  hardware.enableRedistributableFirmware = true;
-
-  # --- PARAMÈTRE SYSTÈME OBLIGATOIRE ---
-  # Cette ligne est requise pour la gestion des versions d'état de NixOS.
-  system.stateVersion = "26.05";
-
-  # --- CONFIGURATION RÉSEAU ---
-  networking.networkmanager.enable = true;
-  networking.networkmanager.settings = {
-    main = {
-      hostname-mode = "none";
-    };
+  networking.networkmanager = {
+    enable = true;
+    settings.main.hostname-mode = "none";
   };
 
-  # Activation du routage IPv4 (Vital pour Flannel WireGuard et MetalLB BGP)
-  boot.kernel.sysctl = {
-    "net.ipv4.ip_forward" = 1;
+  # --- PARE-FEU WORKER ---
+  networking.firewall = {
+    enable = true;
+    checkReversePath = "loose";
+    trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
+    allowedTCPPorts = [
+      22    # SSH
+      10250 # Kubelet API
+      9500  # Longhorn Manager / CSI
+      9501  # Longhorn Conversion Webhook
+      9502  # Longhorn Admission Webhook
+      9503  # Longhorn Recovery Backend
+    ];
+    allowedTCPPortRanges = [
+      { from = 10000; to = 10020; } # Longhorn Instance Manager
+      { from = 30000; to = 32767; } # NodePort
+    ];
+    allowedUDPPorts = [
+      8472  # Flannel VXLAN
+      51820 # Flannel WireGuard IPv4
+      51821 # Flannel WireGuard IPv6
+    ];
   };
 
-  # Forcer SSH à attendre le montage persistant pour garantir l'identité de l'hôte
-  systemd.services.sshd = {
-    requires = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
-    after = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
+  # --- PRÉREQUIS LONGHORN (ISCSI) AUTO-RÉPARATEUR ---
+  services.openiscsi = {
+    enable = true;
+    name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
   };
-
-  # Désactivation de l'extinction de l'écran (tty) pour lisibilité des crashs
-  boot.kernelParams = [ "consoleblank=0" ];
-
-  # Création déclarative des liens symboliques attendus par Longhorn
+  systemd.services.iscsid.serviceConfig = {
+    Restart = lib.mkForce "always";
+    RestartSec = lib.mkForce "2s";
+  };
   systemd.tmpfiles.rules = [
     "L+ /usr/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
     "L+ /usr/local/bin/iscsiadm - - - - ${pkgs.openiscsi}/bin/iscsiadm"
   ];
 
-  # --- SÉCURITÉ : PARE-FEU WORKER ---
-  networking.firewall.enable = true;
+  environment.etc."secrets.yaml".source = ../../secrets.yaml;
 
-  # TOLÉRANCE AU ROUTAGE ASYMÉTRIQUE DU CNI (FLANNEL)
-  networking.firewall.checkReversePath = "loose";
-
-  services.journald.extraConfig = ''
-    SystemMaxUse=50M
-    RuntimeMaxUse=50M
-    MaxRetentionSec=1d
-  '';
-
-  # Confiance absolue sur les interfaces réseau internes du cluster k3s
-  networking.firewall.trustedInterfaces = [ "cni0" "flannel.1" "flannel-wg" ];
-
-  # Ouverture des ports vitaux pour un nœud agent k3s
-  networking.firewall.allowedTCPPorts = [ 
-    22      # Maintenance SSH
-    10250   # API Kubelet (Nécessaire pour les logs, metrics-server et port-forwarding)
-  ];
-
-  # Ouverture de la plage NodePort pour l'accès externe aux applications
-  networking.firewall.allowedTCPPortRanges = [
-    { from = 30000; to = 32767; }
-  ];
-
-  networking.firewall.allowedUDPPorts = [
-    8472    # Flannel VXLAN (Communication inter-nœuds)
-    51820   # Flannel WireGuard IPv4
-    51821   # Flannel WireGuard IPv6
-  ];
-
-  # --- PRÉREQUIS POUR LONGHORN (STOCKAGE K8S) ---
-  services.openiscsi.enable = true;
-  services.openiscsi.name = "iqn.2016-04.com.open-iscsi:${config.networking.hostName}";
-  environment.systemPackages = with pkgs; [ 
-    util-linux 
-    nfs-utils 
-    openiscsi 
+  environment.systemPackages = with pkgs; [
+    util-linux
+    nfs-utils
+    openiscsi
     nftables
     iptables
     xfsprogs
+    e2fsprogs
+    pciutils
+    usbutils
   ];
 
-  # --- ACTIVATION SSH AVEC IDENTITÉ PERSISTANTE ---
+  # --- SSH AVEC IDENTITÉ PERSISTANTE SUR DISQUE D'ÉTAT ---
   services.openssh = {
     enable = true;
-    # On force la clé SSH à être stockée sur notre disque physique et non en RAM
+    settings = {
+      PasswordAuthentication = false;
+      PermitRootLogin = "prohibit-password";
+    };
     hostKeys = [
       {
         path = "/var/lib/rancher/k3s/ssh_host_ed25519_key";
@@ -146,78 +136,75 @@
     ];
   };
 
-  # Clés SSH (Windows + Pi + WSL)
+  systemd.services.sshd = {
+    requires = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
+    after = [ "var-lib-rancher-k3s.mount" "prepare-k3s-state.service" ];
+  };
+
   users.users.root = {
-    initialHashedPassword = lib.mkForce null; # <-- C'est cette ligne qui fait taire l'avertissement
+    initialHashedPassword = lib.mkForce null;
     openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s" 
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBkzXmKDx+HcklREJcMUBTt6ID69XGxDfg16OGGNmOGl root@k3s-master"
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx6r4XlHlJlLPL3ZoCX8+HCFt0grzzlffIuZDLckeqg jerom@jerome" # <-- Clé WSL ajoutée
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEx6r4XlHlJlLPL3ZoCX8+HCFt0grzzlffIuZDLckeqg jerom@jerome"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBc1GQqEyCWsi1xcnk3DxSo6LNdLjIV/4ACyyjlJobpi PC Bureau - Jerome"
     ];
   };
 
-  # --- OPTIMISATION MÉMOIRE (OS EN RAM) ---
-  zramSwap.enable = true;
-
-  # --- 1. CONFIGURATION DE L'AGENT K3S ---
-   services.k3s = {
+  # --- AGENT K3S AUTO-RÉPARATEUR & ÉVICTION DYNAMIQUE ---
+  services.k3s = {
     enable = true;
     # renovate: datasource=github-releases depName=k3s-io/k3s
     package = pkgs.k3s;
     role = "agent";
     serverAddr = "https://${clusterIps.master}:6443";
     tokenFile = "/var/lib/rancher/k3s/k3s_token";
-
-  # Sécurisation RAM/Disque via seuils d'éviction Kubelet dynamiques (%)
     extraFlags = toString [
-      "--kubelet-arg=root-dir=/var/lib/kubelet" # <-- ALIGNEMENT STANDARD KUBERNETES
+      "--kubelet-arg=root-dir=/var/lib/kubelet"
       "--kubelet-arg=eviction-hard=memory.available<5%,nodefs.available<10%,nodefs.inodesFree<5%,imagefs.available<10%"
       "--kubelet-arg=eviction-soft=memory.available<10%,nodefs.available<15%"
       "--kubelet-arg=eviction-soft-grace-period=memory.available=2m,nodefs.available=2m"
       "--kubelet-arg=eviction-max-pod-grace-period=120"
+      "--kubelet-arg=serialize-image-pulls=false"
+      "--kubelet-arg=max-parallel-image-pulls=5"
       "--kubelet-arg=container-log-max-size=10Mi"
       "--kubelet-arg=container-log-max-files=3"
     ];
   };
 
   # =====================================================================
-  # ⚠️ ORCHESTRATION DU STOCKAGE HYBRIDE (DÉCLARATIF NIXOS)
+  # ⚠️ ORCHESTRATION DU STOCKAGE HYBRIDE ET PROVISIONNEMENT PARALLÈLE
   # =====================================================================
-
-  # 1. Montage natif du disque d'état (Stateful)
   fileSystems."/var/lib/rancher/k3s" = {
     device = "/dev/disk/by-label/LONGHORN_DAT";
     fsType = "xfs";
-    options = [ "defaults" "pquota" "x-systemd.automount" "noauto" "x-systemd.idle-timeout=0" ];
+    options = [ "defaults" "noatime" "nodiratime" "pquota" "x-systemd.automount" "noauto" "x-systemd.idle-timeout=0" ];
   };
 
-  # 2. Création des répertoires de liaison AVANT les bind mounts
   systemd.services.init-k3s-dirs = {
-    description = "Initialisation des dossiers sources pour K3s";
-    unitConfig = {
-      DefaultDependencies = false;
-    };
+    description = "Initialisation parallèle des répertoires sources K3s/Longhorn";
+    unitConfig.DefaultDependencies = false;
     wantedBy = [ "local-fs.target" ];
-    before = [ 
-      "var-lib-longhorn.mount" 
+    before = [
+      "var-lib-longhorn.mount"
       "var-lib-kubelet.mount"
       "etc-rancher-node.mount"
       "k3s.service"
     ];
     requires = [ "var-lib-rancher-k3s.mount" ];
     after = [ "var-lib-rancher-k3s.mount" ];
-    serviceConfig = { 
-      Type = "oneshot"; 
-      RemainAfterExit = true; 
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
     };
     script = ''
-      mkdir -p /var/lib/rancher/k3s/longhorn_default
-      mkdir -p /var/lib/rancher/k3s/kubelet
-      mkdir -p /var/lib/rancher/k3s/etc_rancher_node
+      mkdir -p \
+        /var/lib/rancher/k3s/longhorn_default \
+        /var/lib/rancher/k3s/kubelet \
+        /var/lib/rancher/k3s/etc_rancher_node
     '';
   };
 
-  # 3. Bind Mounts déclaratifs (liaison de la RAM vers le disque physique)
   fileSystems."/var/lib/longhorn" = {
     device = "/var/lib/rancher/k3s/longhorn_default";
     fsType = "none";
@@ -235,88 +222,89 @@
   fileSystems."/var/lib/kubelet" = {
     device = "/var/lib/rancher/k3s/kubelet";
     fsType = "none";
-    options = [ "bind" "shared" ]; # "shared" est vital pour la propagation des montages CSI Longhorn
+    options = [ "bind" "shared" ];
     depends = [ "/var/lib/rancher/k3s" ];
   };
 
-  # 4. Configuration finale (SSH, Longhorn JSON et SOPS)
+  # Provisionnement concurrent (Clé SSH + SOPS + Détection Disque Longhorn + Purge CSI)
   systemd.services.prepare-k3s-state = {
-    description = "Génération SSH, JSON Longhorn et décryptage SOPS";
+    description = "Provisionnement parallèle de l'état K3s, SOPS et Longhorn";
     wantedBy = [ "multi-user.target" ];
-    # CORRECTION : Liaison stricte avec k3s-agent.service
     before = [ "k3s.service" "sshd.service" ];
     requiredBy = [ "k3s.service" ];
     requires = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
     after = [ "var-lib-rancher-k3s.mount" "var-lib-longhorn.mount" ];
-    path = with pkgs; [ util-linux sops ssh-to-age openssh jq ];
-    serviceConfig = { 
-      Type = "oneshot"; 
-      RemainAfterExit = true; 
+    path = with pkgs; [ coreutils util-linux sops ssh-to-age openssh jq ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
     };
     script = ''
-      set -e
+      set -euo pipefail
       MOUNT_POINT="/var/lib/rancher/k3s"
 
-      echo "🛡️ PROVISIONNEMENT DE L'ÉTAT DU NŒUD"
+      # Tâche 1 : Clé SSH hôte + déchiffrement SOPS du token k3s en RAM puis écriture atomique
+      (
+        if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
+          ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
+        fi
+        export SOPS_AGE_KEY=$(ssh-to-age -private-key -i "$MOUNT_POINT/ssh_host_ed25519_key")
+        sops -d --extract '["k3s_token"]' /etc/secrets.yaml > /dev/shm/k3s_token.tmp
+        chmod 600 /dev/shm/k3s_token.tmp
+        mv -f /dev/shm/k3s_token.tmp "$MOUNT_POINT/k3s_token"
+      ) &
 
-      if [ ! -f "$MOUNT_POINT/ssh_host_ed25519_key" ]; then
-        ssh-keygen -t ed25519 -f "$MOUNT_POINT/ssh_host_ed25519_key" -N "" -q
-      fi
+      # Tâche 2 : Détection agnostique du type de support (SSD/NVMe vs HDD) pour Longhorn
+      (
+        if [ ! -f /var/lib/longhorn/default-disks.json ]; then
+          DISK_NAME=$(lsblk -no PKNAME /dev/disk/by-label/LONGHORN_DAT | tr -d ' ' | head -n 1 || true)
+          if [ -z "$DISK_NAME" ]; then
+            DISK_NAME=$(basename "$(readlink -f /dev/disk/by-label/LONGHORN_DAT)")
+          fi
+          ROTA=$(cat "/sys/block/$DISK_NAME/queue/rotational" 2>/dev/null || lsblk -d -n -o ROTA "/dev/$DISK_NAME" | tr -d ' ' || echo "0")
+          if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
+          echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
+        fi
+      ) &
 
-      DISK_NAME=$(lsblk -no PKNAME /dev/disk/by-label/LONGHORN_DAT | tr -d ' ' || true)
-      if [ -z "$DISK_NAME" ]; then
-        DISK_NAME=$(basename $(readlink -f /dev/disk/by-label/LONGHORN_DAT))
-      fi
-      
-      ROTA=$(lsblk -d -n -o ROTA "/dev/$DISK_NAME" | tr -d ' ' || echo "0")
-      if [ "$ROTA" = "1" ]; then DISK_TAG="hdd"; else DISK_TAG="ssd"; fi
-      
-      # FIX: Idempotence stricte pour ne pas déclencher le 'mismatch' Longhorn
-      if [ ! -f /var/lib/longhorn/default-disks.json ]; then
-        echo "[{\"path\":\"/var/lib/longhorn\",\"allowScheduling\":true,\"storageReserved\":0,\"tags\":[\"$DISK_TAG\",\"primary\"]}]" > /var/lib/longhorn/default-disks.json
-      fi
+      # Tâche 3 : Nettoyage des sockets CSI résiduels
+      (
+        rm -f "$MOUNT_POINT"/agent/kubelet/plugins_registry/*.sock || true
+        rm -rf "$MOUNT_POINT"/agent/kubelet/plugins/driver.longhorn.io/* || true
+      ) &
 
-      PUBLIC_AGE_KEY=$(ssh-to-age -private-key -i $MOUNT_POINT/ssh_host_ed25519_key)
-      export SOPS_AGE_KEY=$PUBLIC_AGE_KEY
-      sops -d --extract '["k3s_token"]' /etc/secrets.yaml > $MOUNT_POINT/k3s_token
-      chmod 600 $MOUNT_POINT/k3s_token
-
-      echo "🧹 Nettoyage des sockets CSI résiduels..."
-      rm -f $MOUNT_POINT/agent/kubelet/plugins_registry/*.sock || true
-      rm -rf $MOUNT_POINT/agent/kubelet/plugins/driver.longhorn.io/* || true
+      wait
     '';
   };
 
-  # 5. Sécurité : Forcer K3s-agent à attendre la fin absolue des montages
   systemd.services.k3s = {
-    after = [ 
-      "var-lib-rancher-k3s.mount" 
-      "var-lib-longhorn.mount" 
-      "var-lib-kubelet.mount" 
-      "etc-rancher-node.mount" 
+    unitConfig.StartLimitIntervalSec = lib.mkForce 0;
+    environment = {
+      GOMEMLIMIT = "1024MiB";
+      GOGC = "80";
+    };
+    after = [
+      "var-lib-rancher-k3s.mount"
+      "var-lib-longhorn.mount"
+      "var-lib-kubelet.mount"
+      "etc-rancher-node.mount"
       "init-k3s-dirs.service"
       "prepare-k3s-state.service"
+      "set-deterministic-hostname.service"
     ];
-    requires = [ 
-      "var-lib-rancher-k3s.mount" 
-      "var-lib-longhorn.mount" 
+    requires = [
+      "var-lib-rancher-k3s.mount"
+      "var-lib-longhorn.mount"
       "var-lib-kubelet.mount"
-      "etc-rancher-node.mount" 
+      "etc-rancher-node.mount"
+      "prepare-k3s-state.service"
     ];
+    serviceConfig = {
+      Restart = lib.mkForce "always";
+      RestartSec = lib.mkForce "3s";
+      OOMScoreAdjust = lib.mkForce (-900);
+    };
   };
 
-  # --- AUTOMATISATION DU NETTOYAGE ET OPTIMISATION ---
-  nix = {
-    gc = {
-      automatic = true;
-      dates = "daily"; # Se lance tous les jours
-      options = "--delete-older-than 3d"; # SUPPRIME les versions de plus de 3 jours
-    };
-    optimise = {
-      automatic = true;
-      dates = [ "daily" ]; # DÉDOUBLONNE le store tous les jours en arrière-plan
-    };
-    settings.auto-optimise-store = true; # Dédoublonne aussi à la volée pendant la compilation
-  };
-
- }
+  system.stateVersion = "26.05";
+}

@@ -1,5 +1,5 @@
 ---
-# 1. Bloquer tout le trafic entrant et sortant par défaut
+# 1. Bloquer tout le trafic entrant et sortant par défaut (Zero-Trust)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -8,10 +8,10 @@ metadata:
 spec:
   podSelector: {}
   policyTypes:
-  - Ingress
-  - Egress
+    - Ingress
+    - Egress
 ---
-# 2. Autoriser Traefik à joindre les services (Ingress)
+# 2. Autoriser Traefik à joindre les services applicatifs (Ingress)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -20,12 +20,12 @@ metadata:
 spec:
   podSelector: {}
   policyTypes:
-  - Ingress
+    - Ingress
   ingress:
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: traefik-system
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
 ---
 # 3. Autoriser Authelia (Egress) à requêter LLDAP sur le port 3890
 apiVersion: networking.k8s.io/v1
@@ -38,15 +38,15 @@ spec:
     matchLabels:
       app.kubernetes.io/name: authelia
   policyTypes:
-  - Egress
+    - Egress
   egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: lldap
-    ports:
-    - protocol: TCP
-      port: 3890
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: lldap
+      ports:
+        - protocol: TCP
+          port: 3890
 ---
 # 3bis. Autoriser LLDAP (Ingress) à recevoir les requêtes d'Authelia
 apiVersion: networking.k8s.io/v1
@@ -57,17 +57,17 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: lldap
+      app.kubernetes.io/name: lldap
   policyTypes:
-  - Ingress
+    - Ingress
   ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app.kubernetes.io/name: authelia
-    ports:
-    - protocol: TCP
-      port: 3890
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: authelia
+      ports:
+        - protocol: TCP
+          port: 3890
 ---
 # 4. Autoriser la résolution DNS vers CoreDNS
 apiVersion: networking.k8s.io/v1
@@ -78,17 +78,17 @@ metadata:
 spec:
   podSelector: {}
   policyTypes:
-  - Egress
+    - Egress
   egress:
-  - to:
-    - namespaceSelector:
-        matchLabels:
-          kubernetes.io/metadata.name: kube-system
-    ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
 ---
 # 5. Autoriser le Webtop à naviguer sur Internet (HTTP/HTTPS)
 apiVersion: networking.k8s.io/v1
@@ -99,15 +99,15 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      app: webtop
+      app.kubernetes.io/name: webtop
   policyTypes:
-  - Egress
+    - Egress
   egress:
-  - ports:
-    - protocol: TCP
-      port: 80
-    - protocol: TCP
-      port: 443
+    - ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
 ---
 # 6. Autoriser Authelia à vérifier l'heure (NTP) pour la sécurité TOTP
 apiVersion: networking.k8s.io/v1
@@ -120,8 +120,8 @@ spec:
     matchLabels:
       app.kubernetes.io/name: authelia
   policyTypes:
-  - Egress
+    - Egress
   egress:
-  - ports:
-    - protocol: UDP
-      port: 123
+    - ports:
+        - protocol: UDP
+          port: 123
