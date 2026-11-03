@@ -40,7 +40,7 @@ spec:
           app:
             image:
               repository: lldap/lldap
-              tag: v0.6.1-alpine
+              tag: v0.6.3-alpine
             command: ["/app/lldap"]
             args: ["run"]
             env:
