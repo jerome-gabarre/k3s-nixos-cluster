@@ -10,7 +10,7 @@ spec:
   chart:
     spec:
       chart: node-feature-discovery
-      version: "0.17.x"
+      version: "0.20.x"
       sourceRef:
         kind: HelmRepository
         name: nfd
