@@ -163,7 +163,6 @@
       "--kubelet-arg=eviction-soft-grace-period=memory.available=2m,nodefs.available=2m"
       "--kubelet-arg=eviction-max-pod-grace-period=120"
       "--kubelet-arg=serialize-image-pulls=false"
-      "--kubelet-arg=max-parallel-image-pulls=5"
       "--kubelet-arg=container-log-max-size=10Mi"
       "--kubelet-arg=container-log-max-files=3"
     ];
