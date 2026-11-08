@@ -93,7 +93,6 @@ spec:
     service:
       svc:
         controller: lldap
-        forceRename: lldap-svc
         ports:
           http:
             port: 17170

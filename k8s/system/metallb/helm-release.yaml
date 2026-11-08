@@ -46,7 +46,7 @@ spec:
         limits:
           cpu: 200m
           memory: 192Mi
-postRenderers:
+  postRenderers:
     - kustomize:
         patches:
           - target:
