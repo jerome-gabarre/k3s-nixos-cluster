@@ -47,7 +47,6 @@ spec:
               - key: node-role.kubernetes.io/control-plane
                 operator: DoesNotExist
     service:
-      type: LoadBalancer
       spec:
         externalTrafficPolicy: Local
     providers:
