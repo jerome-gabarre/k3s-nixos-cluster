@@ -88,7 +88,7 @@ spec:
         ldap:
           enabled: true
           implementation: custom
-          address: ldap://lldap-svc.default.svc.cluster.local:3890
+          address: ldap://lldap.default.svc.cluster.local:3890
           timeout: 5s
           start_tls: false
           base_dn: dc=home,dc=arpa
