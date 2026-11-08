@@ -46,3 +46,14 @@ spec:
         limits:
           cpu: 200m
           memory: 192Mi
+postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              kind: Deployment
+              name: metallb-system-metallb-frr-k8s-statuscleaner
+            patch: |
+              - op: replace
+                path: /spec/strategy
+                value:
+                  type: Recreate

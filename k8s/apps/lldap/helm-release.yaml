@@ -44,7 +44,7 @@ spec:
             command: ["/app/lldap"]
             args: ["run"]
             env:
-              LLDAP_DATABASE_URL: "sqlite:///data/users.db"
+              LLDAP_DATABASE_URL: "sqlite:///data/users.db?mode=rwc"
               LLDAP_KEY_FILE: "/data/server_key"
               LLDAP_LDAP_BASE_DN: "dc=home,dc=arpa"
               LLDAP_HTTP_URL: "http://lldap.home.arpa"
@@ -93,6 +93,7 @@ spec:
     service:
       svc:
         controller: lldap
+        forceRename: lldap-svc
         ports:
           http:
             port: 17170
