@@ -35,8 +35,6 @@ spec:
     deployment:
       kind: DaemonSet
     env:
-      - name: GOMEMLIMIT
-        value: "250MiB"
       - name: GOGC
         value: "80"
     affinity:
