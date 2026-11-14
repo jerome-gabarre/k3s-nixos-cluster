@@ -45,7 +45,7 @@ spec:
           worker:
             image:
               repository: alpine
-              tag: "3.21"
+              tag: "3.24"
             command: ["/opt/freecad-turbo/bin/freecad-turbo-worker"]
             args:
               - "--mode=k3s-pull-worker"
