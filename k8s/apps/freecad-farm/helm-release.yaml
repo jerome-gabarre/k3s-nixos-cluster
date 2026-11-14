@@ -1,0 +1,117 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: freecad-farm
+  namespace: default
+spec:
+  interval: 10m
+  timeout: 5m
+  chart:
+    spec:
+      chart: app-template
+      version: "5.3.x"
+      sourceRef:
+        kind: HelmRepository
+        name: bjw-s
+        namespace: flux-system
+  driftDetection:
+    mode: enabled
+  install:
+    remediation:
+      retries: -1
+  upgrade:
+    cleanupOnFail: true
+    remediation:
+      retries: -1
+      strategy: rollback
+  values:
+    defaultPodOptions:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64", "arm64"]
+    controllers:
+      cam-worker:
+        type: deployment
+        replicas: 1
+        strategy: RollingUpdate
+        containers:
+          worker:
+            image:
+              repository: alpine
+              tag: "3.21"
+            command: ["/opt/freecad-turbo/bin/freecad-turbo-worker"]
+            args:
+              - "--mode=k3s-pull-worker"
+              - "--spool-dir=/dev/shm/freecad-global-spool"
+              - "--persist-dir=/var/lib/freecad-projects"
+            probes:
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/opt/freecad-turbo/bin/freecad-turbo-worker", "--ready"]
+                  periodSeconds: 2
+                  failureThreshold: 15
+              liveness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/opt/freecad-turbo/bin/freecad-turbo-worker", "--healthcheck"]
+                  periodSeconds: 10
+                  failureThreshold: 3
+              readiness:
+                enabled: true
+                custom: true
+                spec:
+                  exec:
+                    command: ["/opt/freecad-turbo/bin/freecad-turbo-worker", "--ready"]
+                  periodSeconds: 5
+                  failureThreshold: 3
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 2000m
+                memory: 1800Mi
+    persistence:
+      nix-store:
+        enabled: true
+        type: hostPath
+        hostPath: /nix/store
+        hostPathType: Directory
+        globalMounts:
+          - path: /nix/store
+            readOnly: true
+      turbo-bin:
+        enabled: true
+        type: hostPath
+        hostPath: /run/freecad-turbo-bin
+        hostPathType: Directory
+        globalMounts:
+          - path: /opt/freecad-turbo/bin
+            readOnly: true
+      ram-spool:
+        enabled: true
+        type: emptyDir
+        medium: Memory
+        sizeLimit: 1Gi
+        globalMounts:
+          - path: /dev/shm/freecad-global-spool
+      projects:
+        enabled: true
+        type: persistentVolumeClaim
+        storageClass: longhorn
+        accessMode: ReadWriteOnce
+        size: 10Gi
+        globalMounts:
+          - path: /var/lib/freecad-projects

@@ -15,6 +15,7 @@
 
     commonSpecialArgs = { inherit clusterIps inputs; };
     pkgs = import nixpkgs { system = "x86_64-linux"; };
+    forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
 
     deploy-os = pkgs.writeShellScriptBin "deploy-os" ''
       set -euo pipefail
@@ -71,6 +72,22 @@
       ssh "root@$ip" "wipefs -a -f $dev && mkfs.xfs -f -L LONGHORN_DAT $dev && echo '✅ Disque formaté et labellisé LONGHORN_DAT'"
     '';
   in {
+    nixosModules.freecad-turbo = ./modules/cfao/freecad-turbo.nix;
+
+    packages = forAllSystems (system:
+      let
+        sysPkgs = import nixpkgs { inherit system; };
+        fcTurbo = sysPkgs.callPackage ./pkgs/freecad-turbo { };
+      in {
+        inherit (fcTurbo)
+          freecadRsEngine
+          freecadTurboBase
+          freecadNativeLauncher
+          freecadWorkerOci;
+        default = fcTurbo.freecadNativeLauncher;
+      }
+    );
+
     nixosConfigurations = {
       "k3s-master" = nixpkgs.lib.nixosSystem {
         system = "aarch64-linux";
@@ -96,7 +113,9 @@
         specialArgs = commonSpecialArgs;
         modules = [
           ./modules/common/universal-tuning.nix
+          ./modules/cfao/freecad-turbo.nix
           ./hosts/worker/worker-pxe.nix
+          { services.freecadTurbo.enable = true; }
         ];
       };
     };
@@ -119,6 +138,9 @@
         yq-go
         ripgrep
         fd
+        cargo
+        rustc
+        pkg-config
         nixos-rebuild
         deploy-os
         deploy-dns

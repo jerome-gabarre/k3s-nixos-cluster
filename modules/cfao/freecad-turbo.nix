@@ -25,15 +25,14 @@ in
       freecadPkg.freecadRsEngine
     ];
 
-    # Préparation déclarative des répertoires (Zéro script shell)
     systemd.tmpfiles.rules = [
+      "L+ /run/freecad-turbo-bin - - - - ${freecadPkg.freecadRsEngine}/bin"
       "d /dev/shm/freecad-global-spool 1777 root root -"
       "d /dev/shm/freecad-global-spool/queue 1777 root root -"
       "d /dev/shm/freecad-global-spool/results 1777 root root -"
       "d ${cfg.persistentProjectDir} 0775 root users -"
     ];
 
-    # Démon Worker + Spooler RAM épinglé sur les E-Cores (Flux tiré local & Sync zstd)
     systemd.services.freecad-local-worker = {
       description = "FreeCAD Turbo Local Pull-Worker & Async RAM Spooler (E-Cores)";
       wantedBy = [ "multi-user.target" ];
@@ -50,18 +49,12 @@ in
         Restart = "always";
         RestartSec = "500ms";
         StartLimitIntervalSec = 0;
-
-        # Ordonnancement asymétrique : tâche de fond sur cœurs d'efficience
         Nice = 15;
         CPUSchedulingPolicy = "idle";
         IOSchedulingClass = "idle";
-
-        # Plafonds mémoire stricts anti-fuite (Recyclage proactif via cgroups v2)
         MemoryHigh = "60%";
         MemoryMax = "75%";
         TasksMax = 512;
-
-        # Durcissement et accès natif à la RAM partagée
         PrivateTmp = false;
         ProtectSystem = "strict";
         ReadWritePaths = [ "/dev/shm" cfg.persistentProjectDir ];

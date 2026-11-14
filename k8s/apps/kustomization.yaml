@@ -6,3 +6,4 @@ resources:
   - lldap
   - authelia
   - webtop
+  - freecad-farm
