@@ -47,6 +47,7 @@ let
         cat ${./freecad-Mod-Turbo/Init.py}
       } > $out/Mod/FreeCADTurbo/Init.py
       cp $out/Mod/FreeCADTurbo/Init.py $out/lib/FreeCADTurbo.py
+      cp ${./freecad-Mod-Turbo/InitGui.py} $out/Mod/FreeCADTurbo/InitGui.py
       ln -sf ${freecadRsEngine}/lib/libfreecad_rs_universal.so $out/lib/freecad_rs_universal.so
       ln -sf ${freecadRsEngine}/lib/libfreecad_rs_universal.so $out/Mod/FreeCADTurbo/freecad_rs_universal.so
     '';
