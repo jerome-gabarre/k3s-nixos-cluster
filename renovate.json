@@ -6,13 +6,19 @@
     ":semanticCommits"
   ],
   "flux": {
-    "fileMatch": ["^k8s/.+\\.yaml$"]
+    "managerFilePatterns": [
+      "/^k8s/.+\\.yaml$/"
+    ]
   },
   "helm-values": {
-    "fileMatch": ["^k8s/.+\\.yaml$"]
+    "managerFilePatterns": [
+      "/^k8s/.+\\.yaml$/"
+    ]
   },
   "kubernetes": {
-    "fileMatch": ["^k8s/.+\\.yaml$"]
+    "managerFilePatterns": [
+      "/^k8s/.+\\.yaml$/"
+    ]
   },
   "nix": {
     "enabled": true
@@ -20,7 +26,9 @@
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["\\.nix$"],
+      "managerFilePatterns": [
+        "/\\.nix$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.*version\\s*=\\s*\"(?<currentValue>.*?)\""
       ]
