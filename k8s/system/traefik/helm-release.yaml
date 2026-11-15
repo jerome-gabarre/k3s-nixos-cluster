@@ -34,6 +34,10 @@ spec:
   values:
     deployment:
       kind: DaemonSet
+    ingressClass:
+      enabled: true
+      isDefaultClass: true
+      name: traefik
     env:
       - name: GOGC
         value: "80"
@@ -42,8 +46,8 @@ spec:
         requiredDuringSchedulingIgnoredDuringExecution:
           nodeSelectorTerms:
             - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: DoesNotExist
+                - key: node-role.kubernetes.io/control-plane
+                  operator: DoesNotExist
     service:
       spec:
         externalTrafficPolicy: Local
