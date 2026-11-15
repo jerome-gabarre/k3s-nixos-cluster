@@ -47,6 +47,7 @@ in
       description = "FreeCAD Turbo Local Pull-Worker & Async RAM Spooler (E-Cores)";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
       serviceConfig = {
         EnvironmentFile = "-/run/os-topology/env";
         ExecStart = ''
