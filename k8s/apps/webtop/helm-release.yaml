@@ -41,6 +41,7 @@ spec:
               PUID: "1000"
               PGID: "1000"
               TZ: "Europe/Paris"
+              PATH: "/opt/freecad-turbo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             probes:
               startup:
                 enabled: true
@@ -66,8 +67,8 @@ spec:
                 cpu: 100m
                 memory: 512Mi
               limits:
-                cpu: 1000m
-                memory: 2Gi
+                cpu: 2000m
+                memory: 3Gi
     service:
       svc:
         controller: webtop
@@ -104,3 +105,26 @@ spec:
         sizeLimit: 1Gi
         globalMounts:
           - path: /dev/shm
+      ram-spool:
+        enabled: true
+        type: hostPath
+        hostPath: /dev/shm/freecad-global-spool
+        hostPathType: DirectoryOrCreate
+        globalMounts:
+          - path: /dev/shm/freecad-global-spool
+      nix-store:
+        enabled: true
+        type: hostPath
+        hostPath: /nix/store
+        hostPathType: Directory
+        globalMounts:
+          - path: /nix/store
+            readOnly: true
+      turbo-bin:
+        enabled: true
+        type: hostPath
+        hostPath: /run/freecad-turbo-bin
+        hostPathType: Directory
+        globalMounts:
+          - path: /opt/freecad-turbo/bin
+            readOnly: true

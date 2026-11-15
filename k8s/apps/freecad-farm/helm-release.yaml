@@ -102,9 +102,9 @@ spec:
             readOnly: true
       ram-spool:
         enabled: true
-        type: emptyDir
-        medium: Memory
-        sizeLimit: 1Gi
+        type: hostPath
+        hostPath: /dev/shm/freecad-global-spool
+        hostPathType: DirectoryOrCreate
         globalMounts:
           - path: /dev/shm/freecad-global-spool
       projects:
