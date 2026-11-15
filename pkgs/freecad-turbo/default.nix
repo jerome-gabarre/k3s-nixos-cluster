@@ -55,6 +55,7 @@ let
   freecadNativeLauncher = pkgs.writers.writeRustBin "freecad-turbo" { } ''
     use std::fs;
     use std::os::unix::process::CommandExt;
+    use std::path::Path;
     use std::process::Command;
 
     extern "C" {
@@ -80,7 +81,7 @@ let
         let _ = fs::create_dir_all(format!("{}/queue", spool_dir));
 
         let topo = fs::read_to_string("/run/os-topology/env").unwrap_or_default();
-        let threads = extract_var(&topo, "OPTIMAL_THREADS").unwrap_or_else(|| "4".to_string());
+        let threads = extract_var(&topo, "OPTIMAL_THREADS").unwrap_or_else(|| "8".to_string());
         let batch_size = extract_var(&topo, "OPTIMAL_BATCH").unwrap_or_else(|| "512".to_string());
 
         let raw_args: Vec<String> = std::env::args().skip(1).collect();
@@ -118,8 +119,8 @@ let
         let current_path = std::env::var("PATH").unwrap_or_default();
         let turbo_path = format!("${pkgs.calculix-ccx}/bin:${pkgs.gmsh}/bin:{}", current_path);
 
-        let err = Command::new(bin)
-            .args(&args)
+        let mut cmd = Command::new(bin);
+        cmd.args(&args)
             .env("PATH", &turbo_path)
             .env("TMPDIR", &spool_dir)
             .env("FREECAD_USER_TEMP", &spool_dir)
@@ -128,18 +129,37 @@ let
             .env("OMP_NUM_THREADS", &threads)
             .env("TBB_NUM_THREADS", &threads)
             .env("RAYON_NUM_THREADS", &threads)
-            // Parallélisation bas niveau du solveur matriciel CalculiX (Spooles / PaStiX / OpenMP)
             .env("CCX_NPROC_STIFFNESS", &threads)
             .env("CCX_NPROC_EQUATION_SOLVER", &threads)
             .env("CCX_NPROC_RESULTS", &threads)
             .env("NUMBER_OF_CPUS", &threads)
+            // Force XCB/GLX pour la compatibilité Coin3D QOpenGLWidget sur Wayland et WSLg
+            .env("QT_QPA_PLATFORM", "xcb")
+            .env("QT_XCB_GL_INTEGRATION", "xcb_glx")
             .env("MIMALLOC_PAGE_RESET", "1")
             .env("MMGT_OPT", "0")
             .env("MMGT_CLEAR", "0")
             .env("PYTHONMALLOC", "malloc")
-            .env("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=65536:glibc.malloc.arena_max=2")
-            .exec();
+            .env("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=65536:glibc.malloc.arena_max=2");
 
+        // Détection automatique WSL2 / Hôte sans /run/opengl-driver : injection de Mesa Nix
+        if !Path::new("/run/opengl-driver").exists() {
+            let old_ld = std::env::var("LD_LIBRARY_PATH").unwrap_or_default();
+            let mesa_ld = format!(
+                "${pkgs.mesa}/lib:${pkgs.libglvnd}/lib:${pkgs.libx11}/lib:${pkgs.libxext}/lib:${pkgs.libxrender}/lib:{}",
+                old_ld
+            );
+            cmd.env("LD_LIBRARY_PATH", mesa_ld)
+                .env("__GLX_VENDOR_LIBRARY_NAME", "mesa")
+                .env("__EGL_VENDOR_LIBRARY_DIRS", "${pkgs.mesa}/share/glvnd/egl_vendor.d")
+                .env("LIBGL_DRIVERS_PATH", "${pkgs.mesa}/lib/dri")
+                .env("GBM_BACKENDS_PATH", "${pkgs.mesa}/lib/gbm")
+                .env("LIBGL_ALWAYS_SOFTWARE", "1")
+                .env("GALLIUM_DRIVER", "llvmpipe")
+                .env("LP_NUM_THREADS", &threads);
+        }
+
+        let err = cmd.exec();
         eprintln!("{{\"level\":\"FATAL\",\"msg\":\"Echec lancement FreeCAD\",\"err\":\"{}\"}}", err);
         std::process::exit(1);
     }

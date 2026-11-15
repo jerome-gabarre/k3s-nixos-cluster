@@ -1,7 +1,7 @@
 # =====================================================================
 # ⚠️ RÔLE : DNS-RESOLVER HORS BANDE (EDGE DNS - BARE-METAL)
 # =====================================================================
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, clusterIps, ... }:
 
 {
   imports = [ ./hardware-configuration.nix ];
@@ -10,14 +10,19 @@
   networking.hostName = "wyse-dns";
   networking.networkmanager.enable = true;
 
-  # Bootloader EFI limité à 3 générations pour protéger l'espace eMMC
+  # Ouverture explicite du port DNS 53 (UDP/TCP) et de l'interface Web (80)
+  networking.firewall = {
+    enable = true;
+    allowedUDPPorts = [ 53 ];
+    allowedTCPPorts = [ 22 53 80 ];
+  };
+
   boot.loader.systemd-boot = {
     enable = true;
     configurationLimit = 3;
   };
   boot.loader.efi.canTouchEfiVariables = true;
 
-  # Préservation maximale de l'eMMC : logs et tmp en RAM + compression ZSTD
   fileSystems."/var/log" = {
     device = "none";
     fsType = "tmpfs";
@@ -29,7 +34,6 @@
   };
   fileSystems."/".options = [ "compress=zstd" "noatime" ];
 
-  # Désactivation stricte de toute mise en veille
   systemd.targets = {
     sleep.enable = false;
     suspend.enable = false;
@@ -51,7 +55,7 @@
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPDZWfbEfJf4O2b5ACElABkSIiXcwbZWKUA5HuRBlOC admin@cluster-k3s"
   ];
 
-  # AdGuard Home (Binaire natif Go, requêtes parallèles et cache optimisé en RAM)
+  # AdGuard Home avec réécriture déclarative *.home.arpa vers Traefik (192.168.10.51)
   services.adguardhome = {
     enable = true;
     openFirewall = true;
@@ -63,19 +67,31 @@
       dns = {
         bind_hosts = [ "0.0.0.0" ];
         port = 53;
-        upstream_mode = "parallel"; # Requêtes parallèles sur tous les résolveurs amont
-        cache_size = 33554432;      # 32 Mo de cache DNS en RAM
-        cache_optimistic = true;    # Réponse instantanée depuis le cache avec rafraîchissement asynchrone
+        upstream_mode = "parallel";
+        cache_size = 33554432;
+        cache_optimistic = true;
         bootstrap_dns = [ "1.1.1.1" "9.9.9.9" ];
         upstream_dns = [
           "https://dns.cloudflare.com/dns-query"
           "https://dns.quad9.net/dns-query"
         ];
       };
+      filtering = {
+        rewrites_enabled = true;
+        rewrites = [
+          {
+            domain = "*.home.arpa";
+            answer = "192.168.10.51";
+          }
+          {
+            domain = "home.arpa";
+            answer = "192.168.10.51";
+          }
+        ];
+      };
     };
   };
 
-  # Auto-réparation et plafond mémoire strict sans fuite sur AdGuard Home
   systemd.services.adguardhome = {
     unitConfig.StartLimitIntervalSec = lib.mkForce 0;
     environment = {
