@@ -35,6 +35,8 @@ let
     name = "freecad-turbo-base";
     paths = [
       pkgs.freecad
+      pkgs.calculix-ccx
+      pkgs.gmsh
       freecadRsEngine
     ];
     postBuild = ''
@@ -113,8 +115,12 @@ let
             "${pkgs.freecad}/bin/FreeCAD"
         };
 
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let turbo_path = format!("${pkgs.calculix-ccx}/bin:${pkgs.gmsh}/bin:{}", current_path);
+
         let err = Command::new(bin)
             .args(&args)
+            .env("PATH", &turbo_path)
             .env("TMPDIR", &spool_dir)
             .env("FREECAD_USER_TEMP", &spool_dir)
             .env("FREECAD_TURBO_SPOOL", &spool_dir)
@@ -122,6 +128,11 @@ let
             .env("OMP_NUM_THREADS", &threads)
             .env("TBB_NUM_THREADS", &threads)
             .env("RAYON_NUM_THREADS", &threads)
+            // Parallélisation bas niveau du solveur matriciel CalculiX (Spooles / PaStiX / OpenMP)
+            .env("CCX_NPROC_STIFFNESS", &threads)
+            .env("CCX_NPROC_EQUATION_SOLVER", &threads)
+            .env("CCX_NPROC_RESULTS", &threads)
+            .env("NUMBER_OF_CPUS", &threads)
             .env("MIMALLOC_PAGE_RESET", "1")
             .env("MMGT_OPT", "0")
             .env("MMGT_CLEAR", "0")
@@ -139,6 +150,8 @@ let
     tag = "latest";
     contents = [
       freecadRsEngine
+      pkgs.calculix-ccx
+      pkgs.gmsh
       pkgs.mimalloc
       pkgs.zstd
       pkgs.cacert

@@ -1,8 +1,10 @@
+pub mod fem_solver;
 pub mod post_processor;
 
 use pyo3::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::f64::consts::PI;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct ClPoint {
@@ -127,6 +129,15 @@ impl TriDexelGrid {
         }
         max_contact_z.min(safe_z)
     }
+
+    #[inline(always)]
+    pub fn sample_normal_and_z(&self, x: f64, y: f64, tool_radius: f64, safe_z: f64) -> (f64, [f64; 3]) {
+        let z0 = self.sample_cutter_z(x, y, tool_radius, safe_z);
+        let dz_dx = (self.sample_cutter_z(x + self.step, y, tool_radius, safe_z) - z0) / self.step;
+        let dz_dy = (self.sample_cutter_z(x, y + self.step, tool_radius, safe_z) - z0) / self.step;
+        let norm = (dz_dx * dz_dx + dz_dy * dz_dy + 1.0).sqrt();
+        (z0, [-dz_dx / norm, -dz_dy / norm, 1.0 / norm])
+    }
 }
 
 #[inline(always)]
@@ -162,11 +173,107 @@ pub fn generate_universal_toolpath(
 ) -> Vec<ClPoint> {
     let tool_radius = tool_diameter * 0.5;
     let safe_z = bounds_max[2] + 10.0;
-    let dexel_step = (stepover * 0.25).max(0.05);
+    let dexel_step = (stepover * 0.25).clamp(0.05, 1.0);
     let grid = TriDexelGrid::build_parallel(triangles, bounds_min, bounds_max, dexel_step);
 
-    match mode {
-        "TURNING_PROFILE" => {
+    match mode.to_uppercase().as_str() {
+        "ADAPTIVE_TROCHOIDAL" => {
+            let z_levels = (((bounds_max[2] - bounds_min[2]) / stepdown.max(0.2)).ceil() as usize).max(1);
+            let trochoid_radius = (stepover * 0.65).max(0.5);
+            let pitch = (stepover * 0.4).max(0.2);
+            let ny = (((bounds_max[1] - bounds_min[1]) / (stepover * 1.5)).ceil() as usize).max(1);
+            let nx = (((bounds_max[0] - bounds_min[0]) / pitch).ceil() as usize).max(1);
+
+            let slices: Vec<Vec<ClPoint>> = (0..z_levels)
+                .into_par_iter()
+                .map(|iz| {
+                    let z_cut = (bounds_max[2] - ((iz + 1) as f64) * stepdown).max(bounds_min[2]);
+                    let mut pts = Vec::with_capacity(ny * nx * 4);
+                    for iy in 0..=ny {
+                        let base_y = bounds_min[1] + (iy as f64) * (stepover * 1.5);
+                        pts.push(ClPoint { x: bounds_min[0], y: base_y, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true });
+                        for ix in 0..=nx {
+                            let cx = bounds_min[0] + (ix as f64) * pitch;
+                            let model_z = grid.sample_cutter_z(cx, base_y, tool_radius, safe_z);
+                            if z_cut >= model_z {
+                                for step_angle in [0.0, PI * 0.5, PI, PI * 1.5] {
+                                    let tx = cx + trochoid_radius * step_angle.cos();
+                                    let ty = base_y + trochoid_radius * step_angle.sin();
+                                    pts.push(ClPoint { x: tx, y: ty, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false });
+                                }
+                            }
+                        }
+                    }
+                    pts
+                })
+                .collect();
+            slices.into_iter().flatten().collect()
+        }
+        "WATERLINE_ZLEVEL" => {
+            let z_levels = (((bounds_max[2] - bounds_min[2]) / stepdown.max(0.1)).ceil() as usize).max(1);
+            let nx = (((bounds_max[0] - bounds_min[0]) / stepover).ceil() as usize).max(1);
+            let ny = (((bounds_max[1] - bounds_min[1]) / stepover).ceil() as usize).max(1);
+
+            let contours: Vec<Vec<ClPoint>> = (0..=z_levels)
+                .into_par_iter()
+                .map(|iz| {
+                    let z_target = bounds_max[2] - (iz as f64) * stepdown;
+                    let mut ring = Vec::new();
+                    for iy in 0..=ny {
+                        let y = bounds_min[1] + (iy as f64) * stepover;
+                        for ix in 0..=nx {
+                            let x = bounds_min[0] + (ix as f64) * stepover;
+                            let z_surf = grid.sample_cutter_z(x, y, tool_radius, safe_z);
+                            if (z_surf - z_target).abs() <= stepdown * 0.55 {
+                                if ring.is_empty() {
+                                    ring.push(ClPoint { x, y, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true });
+                                }
+                                ring.push(ClPoint { x, y, z: z_target, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false });
+                            }
+                        }
+                    }
+                    ring
+                })
+                .collect();
+            contours.into_iter().flatten().collect()
+        }
+        "CONSTANT_SCALLOP" => {
+            let n_lines = (((bounds_max[1] - bounds_min[1]) / stepover).ceil() as usize).max(1);
+            let rows: Vec<Vec<ClPoint>> = (0..=n_lines)
+                .into_par_iter()
+                .map(|iy| {
+                    let y = bounds_min[1] + (iy as f64) * stepover;
+                    let mut x = bounds_min[0];
+                    let mut row = Vec::new();
+                    row.push(ClPoint { x, y, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true });
+                    while x <= bounds_max[0] {
+                        let (z, norm) = grid.sample_normal_and_z(x, y, tool_radius, safe_z);
+                        let cos_slope = norm[2].abs().clamp(0.25, 1.0);
+                        row.push(ClPoint { x, y, z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false });
+                        x += (stepover * cos_slope).max(0.05);
+                    }
+                    row
+                })
+                .collect();
+            rows.into_iter().flatten().collect()
+        }
+        "SWARF_5AXIS" => {
+            let nx = (((bounds_max[0] - bounds_min[0]) / (stepover * 0.5)).ceil() as usize).max(1);
+            (0..=nx)
+                .into_par_iter()
+                .map(|ix| {
+                    let x = bounds_min[0] + (ix as f64) * (stepover * 0.5);
+                    let y = bounds_min[1];
+                    let (z, norm) = grid.sample_normal_and_z(x, y, tool_radius, safe_z);
+                    let tilt_i = (-norm[1]).clamp(-0.7, 0.7);
+                    let tilt_j = (norm[0]).clamp(-0.7, 0.7);
+                    let tilt_k = (1.0 - tilt_i * tilt_i - tilt_j * tilt_j).max(0.1).sqrt();
+                    ClPoint { x, y, z: z.min(bounds_min[2]), i: tilt_i, j: tilt_j, k: tilt_k, feed: feedrate, rapid: ix == 0 }
+                })
+                .collect()
+        }
+        "TURNING_PROFILE" | "MILL_TURN_CYB" => {
+            let is_mill_turn = mode.eq_ignore_ascii_case("MILL_TURN_CYB");
             let nz = (((bounds_max[2] - bounds_min[2]) / stepover).ceil() as usize).max(1);
             (0..=nz)
                 .into_par_iter()
@@ -175,22 +282,50 @@ pub fn generate_universal_toolpath(
                     let mut max_r = 0.0_f64;
                     for t in triangles {
                         if z >= t.aabb_min[2] && z <= t.aabb_max[2] {
-                            let r0 = (t.v0[0].hypot(t.v0[1])) + tool_radius;
-                            let r1 = (t.v1[0].hypot(t.v1[1])) + tool_radius;
-                            let r2 = (t.v2[0].hypot(t.v2[1])) + tool_radius;
+                            let r0 = t.v0[0].hypot(t.v0[1]) + tool_radius;
+                            let r1 = t.v1[0].hypot(t.v1[1]) + tool_radius;
+                            let r2 = t.v2[0].hypot(t.v2[1]) + tool_radius;
                             max_r = max_r.max(r0).max(r1).max(r2);
                         }
                     }
-                    ClPoint { x: max_r, y: 0.0, z, i: 1.0, j: 0.0, k: 0.0, feed: feedrate, rapid: iz == 0 }
+                    let c_angle = if is_mill_turn { (iz as f64) * 0.15 } else { 0.0 };
+                    ClPoint {
+                        x: max_r * c_angle.cos(),
+                        y: max_r * c_angle.sin(),
+                        z,
+                        i: c_angle.sin(),
+                        j: c_angle.cos(),
+                        k: 0.0,
+                        feed: feedrate,
+                        rapid: iz == 0,
+                    }
                 })
                 .collect()
         }
-        "CUTTING_2D_EDM" => {
+        "WIRE_EDM_4X" => {
             let kerf = tool_radius;
-            let z_cut = bounds_min[2];
+            let taper_uv = stepover * 0.2;
+            let z_wire = bounds_min[2];
             vec![
-                ClPoint { x: bounds_min[0] - kerf, y: bounds_min[1] - kerf, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true },
+                ClPoint { x: bounds_min[0] - kerf, y: bounds_min[1] - kerf, z: z_wire, i: -taper_uv, j: -taper_uv, k: 1.0, feed: feedrate, rapid: true },
+                ClPoint { x: bounds_max[0] + kerf, y: bounds_min[1] - kerf, z: z_wire, i: taper_uv, j: -taper_uv, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: bounds_max[0] + kerf, y: bounds_max[1] + kerf, z: z_wire, i: taper_uv, j: taper_uv, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: bounds_min[0] - kerf, y: bounds_max[1] + kerf, z: z_wire, i: -taper_uv, j: taper_uv, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: bounds_min[0] - kerf, y: bounds_min[1] - kerf, z: z_wire, i: -taper_uv, j: -taper_uv, k: 1.0, feed: feedrate, rapid: false },
+            ]
+        }
+        "CUTTING_2D_EDM" | "CUTTING_2D_KERF" => {
+            let kerf = tool_radius;
+            let lead_in = (tool_diameter * 1.5).max(2.0);
+            let z_cut = bounds_min[2];
+            let z_tab = bounds_min[2] + (stepdown * 0.35).min(1.5);
+            let mid_x = 0.5 * (bounds_min[0] + bounds_max[0]);
+            vec![
+                ClPoint { x: bounds_min[0] - kerf - lead_in, y: bounds_min[1] - kerf - lead_in, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true },
                 ClPoint { x: bounds_min[0] - kerf, y: bounds_min[1] - kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: mid_x - tool_diameter, y: bounds_min[1] - kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: mid_x, y: bounds_min[1] - kerf, z: z_tab, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
+                ClPoint { x: mid_x + tool_diameter, y: bounds_min[1] - kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
                 ClPoint { x: bounds_max[0] + kerf, y: bounds_min[1] - kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
                 ClPoint { x: bounds_max[0] + kerf, y: bounds_max[1] + kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
                 ClPoint { x: bounds_min[0] - kerf, y: bounds_max[1] + kerf, z: z_cut, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: false },
@@ -198,19 +333,23 @@ pub fn generate_universal_toolpath(
             ]
         }
         "PROBING_GRID" => {
-            let cx = 0.5 * (bounds_min[0] + bounds_max[0]);
-            let cy = 0.5 * (bounds_min[1] + bounds_max[1]);
-            let cz = grid.sample_cutter_z(cx, cy, tool_radius, safe_z);
-            vec![
-                ClPoint { x: cx, y: cy, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true },
-                ClPoint { x: cx, y: cy, z: cz, i: 0.0, j: 0.0, k: 1.0, feed: feedrate * 0.25, rapid: false },
-                ClPoint { x: cx, y: cy, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true },
-            ]
+            let mut pts = Vec::with_capacity(27);
+            for ix in 0..3 {
+                for iy in 0..3 {
+                    let px = bounds_min[0] + (ix as f64 + 0.5) * (bounds_max[0] - bounds_min[0]) / 3.0;
+                    let py = bounds_min[1] + (iy as f64 + 0.5) * (bounds_max[1] - bounds_min[1]) / 3.0;
+                    let pz = grid.sample_cutter_z(px, py, tool_radius, safe_z);
+                    pts.push(ClPoint { x: px, y: py, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true });
+                    pts.push(ClPoint { x: px, y: py, z: pz, i: 0.0, j: 0.0, k: 1.0, feed: feedrate * 0.2, rapid: false });
+                    pts.push(ClPoint { x: px, y: py, z: safe_z, i: 0.0, j: 0.0, k: 1.0, feed: feedrate, rapid: true });
+                }
+            }
+            pts
         }
         _ => {
             let n_lines = (((bounds_max[1] - bounds_min[1]) / stepover).ceil() as usize).max(1);
             let n_steps = (((bounds_max[0] - bounds_min[0]) / (stepover * 0.5)).ceil() as usize).max(1);
-            let tilt_5x = mode == "SURFACE_5AXIS";
+            let tilt_5x = mode.eq_ignore_ascii_case("SURFACE_5AXIS");
 
             let lines: Vec<Vec<ClPoint>> = (0..=n_lines)
                 .into_par_iter()
@@ -222,13 +361,11 @@ pub fn generate_universal_toolpath(
                     for ix_raw in 0..=n_steps {
                         let ix = if zig_zag_rev { n_steps - ix_raw } else { ix_raw };
                         let x = bounds_min[0] + (ix as f64) * (stepover * 0.5);
-                        let z_surface = grid.sample_cutter_z(x, y, tool_radius, safe_z).max(bounds_min[2] - stepdown);
+                        let (z_raw, norm) = grid.sample_normal_and_z(x, y, tool_radius, safe_z);
+                        let z_surface = z_raw.max(bounds_min[2] - stepdown);
 
                         let (i, j, k) = if tilt_5x {
-                            let dz_dx = (grid.sample_cutter_z(x + dexel_step, y, tool_radius, safe_z) - z_surface) / dexel_step;
-                            let dz_dy = (grid.sample_cutter_z(x, y + dexel_step, tool_radius, safe_z) - z_surface) / dexel_step;
-                            let norm = (dz_dx * dz_dx + dz_dy * dz_dy + 1.0).sqrt();
-                            (-dz_dx / norm, -dz_dy / norm, 1.0 / norm)
+                            (norm[0], norm[1], norm[2])
                         } else {
                             (0.0, 0.0, 1.0)
                         };
@@ -245,6 +382,116 @@ pub fn generate_universal_toolpath(
             lines.into_iter().flatten().collect()
         }
     }
+}
+
+#[pyfunction]
+fn compute_nesting_2d(
+    py: Python<'_>,
+    part_sizes: Vec<[f64; 2]>,
+    sheet_width: f64,
+    sheet_height: f64,
+    kerf_spacing: f64,
+) -> PyResult<Vec<[f64; 3]>> {
+    let placements = py.allow_threads(move || {
+        let mut indexed: Vec<(usize, [f64; 2])> = part_sizes.into_iter().enumerate().collect();
+        indexed.par_sort_by(|a, b| {
+            let area_b = b.1[0] * b.1[1];
+            let area_a = a.1[0] * a.1[1];
+            area_b.partial_cmp(&area_a).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut results = vec![[0.0, 0.0, 0.0]; indexed.len()];
+        let mut cursor_x = kerf_spacing;
+        let mut cursor_y = kerf_spacing;
+        let mut row_max_h = 0.0_f64;
+
+        for (orig_idx, [w, h]) in indexed {
+            let (pw, ph, rot) = if w > h && (cursor_x + h <= sheet_width) && (cursor_x + w > sheet_width) {
+                (h, w, 90.0)
+            } else {
+                (w, h, 0.0)
+            };
+
+            if cursor_x + pw + kerf_spacing > sheet_width {
+                cursor_x = kerf_spacing;
+                cursor_y += row_max_h + kerf_spacing;
+                row_max_h = 0.0;
+            }
+
+            if cursor_y + ph + kerf_spacing <= sheet_height {
+                results[orig_idx] = [cursor_x, cursor_y, rot];
+                cursor_x += pw + kerf_spacing;
+                row_max_h = row_max_h.max(ph);
+            } else {
+                results[orig_idx] = [-1.0, -1.0, 0.0];
+            }
+        }
+        results
+    });
+    Ok(placements)
+}
+
+#[pyfunction]
+fn compute_fem_analysis(
+    py: Python<'_>,
+    flat_vertices: Vec<f64>,
+    bounds_min: [f64; 3],
+    bounds_max: [f64; 3],
+    mesh_size_mm: f64,
+    young_modulus_mpa: f64,
+    poisson_ratio: f64,
+    density_kg_m3: f64,
+    yield_strength_mpa: f64,
+    total_force_n: f64,
+) -> PyResult<String> {
+    let json_res = py.allow_threads(move || {
+        let triangles: Vec<Triangle3D> = flat_vertices
+            .par_chunks_exact(9)
+            .map(|c| {
+                Triangle3D::from_vertices(
+                    [c[0], c[1], c[2]],
+                    [c[3], c[4], c[5]],
+                    [c[6], c[7], c[8]],
+                )
+            })
+            .collect();
+
+        let res = fem_solver::solve_fem_and_generate_inp(
+            &triangles,
+            bounds_min,
+            bounds_max,
+            mesh_size_mm,
+            young_modulus_mpa,
+            poisson_ratio,
+            density_kg_m3,
+            yield_strength_mpa,
+            total_force_n,
+        );
+        serde_json::to_string(&res).unwrap_or_default()
+    });
+    Ok(json_res)
+}
+
+#[pyfunction]
+fn list_cam_modes() -> Vec<&'static str> {
+    vec![
+        "ADAPTIVE_TROCHOIDAL",
+        "WATERLINE_ZLEVEL",
+        "CONSTANT_SCALLOP",
+        "SURFACE_3AXIS",
+        "SURFACE_5AXIS",
+        "SWARF_5AXIS",
+        "TURNING_PROFILE",
+        "MILL_TURN_CYB",
+        "CUTTING_2D_KERF",
+        "WIRE_EDM_4X",
+        "PROBING_GRID",
+    ]
+}
+
+#[pyfunction]
+fn list_cnc_dialects() -> Vec<&'static str> {
+    post_processor::SUPPORTED_DIALECTS.to_vec()
 }
 
 #[pyfunction]
@@ -293,5 +540,9 @@ fn compute_cam_and_post(
 #[pymodule]
 fn freecad_rs_universal(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compute_cam_and_post, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_nesting_2d, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_fem_analysis, m)?)?;
+    m.add_function(wrap_pyfunction!(list_cam_modes, m)?)?;
+    m.add_function(wrap_pyfunction!(list_cnc_dialects, m)?)?;
     Ok(())
 }
